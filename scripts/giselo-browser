@@ -1,0 +1,202 @@
+#!/home/jesusu/Workspace/agents/crowia/.venv/bin/python3
+"""
+giselo-browser <acción> [args...]
+Cliente CLI para el daemon de Firefox. Auto-inicia el daemon si no está corriendo.
+
+Acciones:
+  start                         Iniciar daemon explícitamente
+  stop                          Detener daemon
+  status                        URL y título actuales
+  navigate <url>                Navegar a URL
+  click <selector|texto>        Click en elemento (CSS selector o texto visible)
+  type <texto>                  Escribir texto en elemento enfocado
+  fill <selector> <texto>       Llenar campo de formulario
+  key <tecla>                   Presionar tecla (Enter, Tab, Escape, ArrowDown...)
+  extract [--selector S] [--format text|html|links]  Extraer contenido
+  screenshot [ruta]             Capturar pantalla (default: /tmp/crowia/browser_screenshot.png)
+  scroll [up|down] [cantidad]   Scroll (default: down 3)
+  tabs                          Listar pestañas
+  new-tab                       Abrir nueva pestaña
+  close-tab                     Cerrar pestaña actual
+  switch-tab <n>                Cambiar a pestaña n
+  wait <ms>                     Esperar ms milisegundos
+  eval <código_js>              Ejecutar JavaScript en la página
+"""
+import json
+import os
+import pathlib
+import socket
+import subprocess
+import sys
+import time
+
+SOCKET_PATH = pathlib.Path("/tmp/crowia/browser.sock")
+PID_FILE    = pathlib.Path("/tmp/crowia/browser.pid")
+DAEMON      = pathlib.Path(__file__).parent / "giselo-browser-daemon"
+LOG_FILE    = pathlib.Path("/tmp/crowia/browser.log")
+
+
+def is_running() -> bool:
+    if not SOCKET_PATH.exists():
+        return False
+    try:
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.connect(str(SOCKET_PATH))
+        s.close()
+        return True
+    except OSError:
+        return False
+
+
+def start_daemon():
+    if is_running():
+        return
+    uid = os.getuid()
+    env = os.environ.copy()
+    env.setdefault("WAYLAND_DISPLAY", "wayland-0")
+    env.setdefault("DISPLAY", ":0")
+    env.setdefault("XDG_RUNTIME_DIR", f"/run/user/{uid}")
+    env.setdefault("DBUS_SESSION_BUS_ADDRESS", f"unix:path=/run/user/{uid}/bus")
+    env.setdefault("MOZ_ENABLE_WAYLAND", "1")
+    pathlib.Path("/tmp/crowia").mkdir(parents=True, exist_ok=True)
+    log = open(LOG_FILE, "a")
+    subprocess.Popen(
+        [str(DAEMON)],
+        start_new_session=True,
+        stdout=log,
+        stderr=log,
+        env=env,
+    )
+    for _ in range(30):
+        if is_running():
+            return
+        time.sleep(0.3)
+    print("Error: daemon no respondió a tiempo. Revisa /tmp/crowia/browser.log", file=sys.stderr)
+    sys.exit(1)
+
+
+def send(cmd: dict) -> dict:
+    data = json.dumps(cmd).encode() + b"\n"
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.connect(str(SOCKET_PATH))
+    s.sendall(data)
+    response = b""
+    while True:
+        chunk = s.recv(65536)
+        if not chunk:
+            break
+        response += chunk
+        if b"\n" in response:
+            break
+    s.close()
+    return json.loads(response.decode().strip())
+
+
+def run(cmd: dict) -> int:
+    start_daemon()
+    result = send(cmd)
+    if result.get("ok"):
+        print(result.get("result", ""))
+        return 0
+    else:
+        print(f"Error: {result.get('error', 'desconocido')}", file=sys.stderr)
+        return 1
+
+
+def main():
+    args = sys.argv[1:]
+    if not args:
+        print(__doc__)
+        sys.exit(0)
+
+    action = args[0].lower()
+
+    if action == "start":
+        start_daemon()
+        print("Daemon iniciado.")
+        return
+
+    if action == "stop":
+        if not is_running():
+            print("Daemon no está corriendo.")
+            return
+        result = send({"action": "stop"})
+        print(result.get("result", "Detenido."))
+        return
+
+    if action == "status":
+        sys.exit(run({"action": "status"}))
+
+    if action == "navigate":
+        url = args[1] if len(args) > 1 else ""
+        sys.exit(run({"action": "navigate", "url": url}))
+
+    if action == "click":
+        target = " ".join(args[1:])
+        # Si parece CSS selector (contiene ., #, [, >) usarlo como selector; si no, como texto
+        if any(c in target for c in ".#[>:()"):
+            sys.exit(run({"action": "click", "selector": target}))
+        else:
+            sys.exit(run({"action": "click", "text": target}))
+
+    if action == "type":
+        text = " ".join(args[1:])
+        sys.exit(run({"action": "type", "text": text}))
+
+    if action == "fill":
+        selector = args[1] if len(args) > 1 else ""
+        text = " ".join(args[2:]) if len(args) > 2 else ""
+        sys.exit(run({"action": "fill", "selector": selector, "text": text}))
+
+    if action == "key":
+        key = args[1] if len(args) > 1 else "Enter"
+        sys.exit(run({"action": "key", "key": key}))
+
+    if action == "extract":
+        cmd: dict = {"action": "extract"}
+        i = 1
+        while i < len(args):
+            if args[i] == "--selector" and i + 1 < len(args):
+                cmd["selector"] = args[i + 1]; i += 2
+            elif args[i] == "--format" and i + 1 < len(args):
+                cmd["format"] = args[i + 1]; i += 2
+            else:
+                i += 1
+        sys.exit(run(cmd))
+
+    if action == "screenshot":
+        path = args[1] if len(args) > 1 else "/tmp/crowia/browser_screenshot.png"
+        sys.exit(run({"action": "screenshot", "path": path}))
+
+    if action == "scroll":
+        direction = args[1] if len(args) > 1 else "down"
+        amount = args[2] if len(args) > 2 else "3"
+        sys.exit(run({"action": "scroll", "direction": direction, "amount": int(amount)}))
+
+    if action == "tabs":
+        sys.exit(run({"action": "tabs"}))
+
+    if action in ("new-tab", "new_tab"):
+        sys.exit(run({"action": "new_tab"}))
+
+    if action in ("close-tab", "close_tab"):
+        sys.exit(run({"action": "close_tab"}))
+
+    if action in ("switch-tab", "switch_tab"):
+        idx = int(args[1]) if len(args) > 1 else 1
+        sys.exit(run({"action": "switch_tab", "index": idx}))
+
+    if action == "wait":
+        ms = int(args[1]) if len(args) > 1 else 1000
+        sys.exit(run({"action": "wait", "ms": ms}))
+
+    if action == "eval":
+        code = " ".join(args[1:])
+        sys.exit(run({"action": "eval", "code": code}))
+
+    print(f"Acción desconocida: '{action}'. Usa 'giselo-browser' sin args para ver ayuda.")
+    sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
