@@ -26,7 +26,7 @@ class OpenCodeBackend(Backend):
                 self._proc.kill()
 
     def ask(self, text, system_prompt, history=None, image_path=None, file_paths=None, timeout=120):
-        full_text = ""
+        full_text = f"[INSTRUCCIONES DEL SISTEMA]\n{system_prompt}\n[FIN INSTRUCCIONES]\n\n" if system_prompt else ""
         if history:
             lines = []
             for msg in history[-6:]:
