@@ -140,8 +140,8 @@ def main():
         log.info("Transcribed: %s", text)
         log.debug("Detecting intents...")
         intents = intent.detect(text)
-        log.debug("Intents: screenshot=%s volume=%s files=%s backend=%s",
-                  intents.screenshot, intents.volume, intents.files, intents.switch_backend)
+        log.debug("Intents: screenshot=%s volume=%s media=%s files=%s backend=%s",
+                  intents.screenshot, intents.volume, intents.media, intents.files, intents.switch_backend)
 
         if intents.switch_backend:
             msg = assistant.switch_backend(intents.switch_backend)
@@ -154,6 +154,12 @@ def main():
         if intents.clear_history:
             history.clear()
             output.show("Crowia", "Historial borrado.")
+            ui("done")
+            return
+
+        if intents.media is not None:
+            result = system_control.control_media(intents.media)
+            output.show("Media", result)
             ui("done")
             return
 
@@ -274,6 +280,12 @@ def main():
             if intents.clear_history:
                 history.clear()
                 output.show("Crowia", "Historial borrado.")
+                ui("done")
+                return
+
+            if intents.media is not None:
+                result = system_control.control_media(intents.media)
+                output.show("Media", result)
                 ui("done")
                 return
 

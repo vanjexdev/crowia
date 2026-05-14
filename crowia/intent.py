@@ -49,6 +49,28 @@ _CLEAR_HISTORY_KW = [
     "reinicia la conversación", "reinicia la conversacion",
 ]
 
+_MEDIA_PAUSE_KW = [
+    "pausa", "pausar", "pausa la música", "pausa el video", "pausa la canción",
+    "para la música", "para la canción", "detén la música", "detener música",
+    "para la música", "stop music", "pause",
+]
+
+_MEDIA_PLAY_KW = [
+    "reanuda", "continúa", "continua", "reproduce", "play",
+    "reanuda la música", "continúa la música", "pon la música",
+    "sigue la música", "sigue reproduciendo",
+]
+
+_MEDIA_NEXT_KW = [
+    "siguiente", "siguiente canción", "siguiente pista", "skip",
+    "salta la canción", "próxima canción", "proxima cancion", "next",
+]
+
+_MEDIA_PREV_KW = [
+    "anterior", "canción anterior", "pista anterior", "regresa", "atrás",
+    "vuelve a la anterior", "previous", "prev",
+]
+
 _VOLUME_PCT = re.compile(r'volumen\s+al\s+(\d{1,3})\s*%?', re.IGNORECASE)
 _FILE_PATH = re.compile(r'(?:~/|/)[^\s,;:]+\.\w+')
 
@@ -58,6 +80,7 @@ class Intents:
         self.screenshot: bool = False
         self.files: list[pathlib.Path] = []
         self.volume = None  # "up" | "down" | "mute" | int
+        self.media: str | None = None  # "pause" | "play" | "next" | "prev"
         self.clear_history: bool = False
         self.switch_backend: str | None = None  # "claude" | "codex" | "opencode"
 
@@ -90,6 +113,15 @@ def detect(text: str) -> Intents:
         result.volume = "down"
     elif any(kw in low for kw in _VOLUME_MUTE_KW):
         result.volume = "mute"
+
+    if any(kw in low for kw in _MEDIA_PAUSE_KW):
+        result.media = "pause"
+    elif any(kw in low for kw in _MEDIA_PLAY_KW):
+        result.media = "play"
+    elif any(kw in low for kw in _MEDIA_NEXT_KW):
+        result.media = "next"
+    elif any(kw in low for kw in _MEDIA_PREV_KW):
+        result.media = "prev"
 
     for raw in _FILE_PATH.findall(text):
         p = pathlib.Path(raw.replace("~", str(pathlib.Path.home())))
