@@ -42,6 +42,9 @@ class Assistant:
             cls = ClaudeCliBackend
         return cls(self._cfg)
 
+    def cancel(self) -> None:
+        self._backend.cancel()
+
     def switch_backend(self, name: str) -> str:
         name = name.lower().strip()
         if name not in BACKENDS:

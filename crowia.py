@@ -79,6 +79,15 @@ def main():
     recorder = Recorder(cfg)
     transcriber = Transcriber(cfg)
     assistant = Assistant(cfg)
+
+    def on_cancel():
+        log.info("Cancel requested")
+        assistant.cancel()
+        if overlay:
+            overlay.notify("idle")
+
+    if overlay:
+        overlay._on_cancel = on_cancel
     output = OutputHandler(cfg)
 
     history_cfg = cfg.get("history", {})

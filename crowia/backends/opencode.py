@@ -4,6 +4,7 @@ import pathlib
 import re
 import shutil
 import subprocess
+import threading
 
 from .base import Backend
 
@@ -18,6 +19,13 @@ class OpenCodeBackend(Backend):
     def __init__(self, cfg: dict):
         self._binary = shutil.which("opencode") or "opencode"
         self._model = cfg.get("opencode", {}).get("model", "opencode/big-pickle")
+        self._proc: subprocess.Popen | None = None
+        self._lock = threading.Lock()
+
+    def cancel(self) -> None:
+        with self._lock:
+            if self._proc and self._proc.poll() is None:
+                self._proc.kill()
 
     def ask(self, text, system_prompt, history=None, image_path=None, file_paths=None, timeout=120):
         full_text = ""
@@ -49,18 +57,25 @@ class OpenCodeBackend(Backend):
         env = os.environ.copy()
 
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=env)
+            with self._lock:
+                self._proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
+            stdout, stderr = self._proc.communicate(timeout=timeout)
+            rc = self._proc.returncode
+            with self._lock:
+                self._proc = None
         except subprocess.TimeoutExpired:
+            self.cancel()
             return f"[crowia] OpenCode tardó demasiado ({timeout}s)."
         except FileNotFoundError:
             return "[crowia] opencode no encontrado."
 
-        if result.returncode != 0:
-            log.error("OpenCode error (rc=%d): %s", result.returncode, result.stderr[:300])
-            return f"[crowia] Error de OpenCode (rc={result.returncode})"
+        if rc == -9:
+            return ""
+        if rc != 0:
+            log.error("OpenCode error (rc=%d): %s", rc, stderr[:300])
+            return f"[crowia] Error de OpenCode (rc={rc})"
 
-        # Strip ANSI and header lines ("> build · model")
-        response = self._clean_output(result.stdout)
+        response = self._clean_output(stdout)
         log.info("OpenCode response (%d chars): %s", len(response), response[:200])
         return response
 
