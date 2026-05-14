@@ -12,6 +12,7 @@ os.environ.setdefault("DISPLAY", ":0")
 uid = os.getuid()
 os.environ.setdefault("XDG_RUNTIME_DIR", f"/run/user/{uid}")
 os.environ.setdefault("DBUS_SESSION_BUS_ADDRESS", f"unix:path=/run/user/{uid}/bus")
+os.environ["QT_LOGGING_RULES"] = "*.debug=false;*.info=false;*.warning=false"
 
 from PyQt6.QtWidgets import QApplication, QDialog, QVBoxLayout, QLabel, QLineEdit, QDialogButtonBox
 from PyQt6.QtCore import Qt
@@ -53,7 +54,8 @@ field.setFocus()
 field.returnPressed.connect(dialog.accept)
 
 if dialog.exec() == QDialog.DialogCode.Accepted:
-    print(field.text(), end="")
+    sys.stdout.write(field.text())
+    sys.stdout.flush()
     sys.exit(0)
 else:
     sys.exit(1)
