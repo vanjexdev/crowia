@@ -27,6 +27,12 @@ _VOLUME_MUTE_KW = [
     "silencia el audio", "quita el sonido",
 ]
 
+_BACKEND_SWITCH = {
+    "claude": ["usa claude", "cambia a claude", "usa el claude"],
+    "codex": ["usa codex", "cambia a codex", "usa el codex"],
+    "opencode": ["usa opencode", "cambia a opencode", "usa el opencode"],
+}
+
 _CLEAR_HISTORY_KW = [
     "borra el historial", "limpia el historial", "olvida la conversación",
     "olvida la conversacion", "nueva conversación", "nueva conversacion",
@@ -43,6 +49,7 @@ class Intents:
         self.files: list[pathlib.Path] = []
         self.volume = None  # "up" | "down" | "mute" | int
         self.clear_history: bool = False
+        self.switch_backend: str | None = None  # "claude" | "codex" | "opencode"
 
 
 def detect(text: str) -> Intents:
@@ -52,6 +59,11 @@ def detect(text: str) -> Intents:
     for kw in _SCREENSHOT_KW:
         if kw in low:
             result.screenshot = True
+            break
+
+    for backend, phrases in _BACKEND_SWITCH.items():
+        if any(p in low for p in phrases):
+            result.switch_backend = backend
             break
 
     for kw in _CLEAR_HISTORY_KW:

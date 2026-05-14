@@ -1,0 +1,59 @@
+#!/home/jesusu/Workspace/agents/crowia/.venv/bin/python3
+"""
+giselo-ask "Pregunta al usuario"
+Muestra un diálogo de texto y devuelve la respuesta a stdout.
+Usado por Claude via Bash para solicitar información al usuario.
+"""
+import os
+import sys
+
+os.environ.setdefault("WAYLAND_DISPLAY", "wayland-0")
+os.environ.setdefault("DISPLAY", ":0")
+uid = os.getuid()
+os.environ.setdefault("XDG_RUNTIME_DIR", f"/run/user/{uid}")
+os.environ.setdefault("DBUS_SESSION_BUS_ADDRESS", f"unix:path=/run/user/{uid}/bus")
+
+from PyQt6.QtWidgets import QApplication, QDialog, QVBoxLayout, QLabel, QLineEdit, QDialogButtonBox
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QFont
+
+question = " ".join(sys.argv[1:]) if len(sys.argv) > 1 else "Ingresa un valor:"
+
+app = QApplication(sys.argv)
+
+dialog = QDialog()
+dialog.setWindowTitle("Giselo — Necesito información")
+dialog.setWindowFlags(
+    Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.Dialog
+)
+dialog.setMinimumWidth(420)
+
+layout = QVBoxLayout(dialog)
+layout.setSpacing(12)
+layout.setContentsMargins(20, 20, 20, 20)
+
+label = QLabel(question)
+label.setWordWrap(True)
+label.setFont(QFont("Sans", 11))
+layout.addWidget(label)
+
+field = QLineEdit()
+field.setFont(QFont("Monospace", 10))
+field.setMinimumHeight(36)
+layout.addWidget(field)
+
+buttons = QDialogButtonBox(
+    QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+)
+buttons.accepted.connect(dialog.accept)
+buttons.rejected.connect(dialog.reject)
+layout.addWidget(buttons)
+
+field.setFocus()
+field.returnPressed.connect(dialog.accept)
+
+if dialog.exec() == QDialog.DialogCode.Accepted:
+    print(field.text(), end="")
+    sys.exit(0)
+else:
+    sys.exit(1)

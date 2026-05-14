@@ -120,6 +120,14 @@ def main():
         log.info("Transcribed: %s", text)
         intents = intent.detect(text)
 
+        if intents.switch_backend:
+            msg = assistant.switch_backend(intents.switch_backend)
+            if overlay:
+                overlay.set_backend(assistant.current_backend_name)
+            output.show("Giselo", msg)
+            ui("done")
+            return
+
         if intents.clear_history:
             history.clear()
             output.show("Crowia", "Historial borrado.")
@@ -161,6 +169,8 @@ def main():
         history.add("user", text)
         history.add("assistant", response)
         output.show(text, response)
+        if overlay:
+            overlay.set_response(response)
         ui("done")
 
     def on_start():
@@ -197,7 +207,7 @@ def main():
 
     if args.always_on:
         ao_cfg = cfg.get("always_on", {})
-        wake_phrases = ao_cfg.get("wake_phrases", ["oye pepito", "hey pepito"])
+        wake_phrases = ao_cfg.get("wake_phrases", ["oye giselo", "hey giselo"])
 
         def on_speech_ready(wav_path):
             ui("processing")
@@ -228,6 +238,14 @@ def main():
 
             log.info("Transcribed: %s", text)
             intents = intent.detect(text)
+
+            if intents.switch_backend:
+                msg = assistant.switch_backend(intents.switch_backend)
+                if overlay:
+                    overlay.set_backend(assistant.current_backend_name)
+                output.show("Giselo", msg)
+                ui("done")
+                return
 
             if intents.clear_history:
                 history.clear()
@@ -269,6 +287,8 @@ def main():
             history.add("user", text)
             history.add("assistant", response)
             output.show(text, response)
+            if overlay:
+                overlay.set_response(response)
             ui("done")
 
         listener = AlwaysOnListener(
