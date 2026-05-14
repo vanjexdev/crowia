@@ -28,7 +28,13 @@ _VOLUME_MUTE_KW = [
 ]
 
 _BACKEND_SWITCH = {
-    "claude": ["usa claude", "cambia a claude", "usa el claude"],
+    "claude": [
+        "usa claude", "cambia a claude", "usa el claude",
+        # Whisper mis-transcriptions of "Claude" in Spanish context
+        "usa cloud", "usa clouding", "usa cloude", "usa clod", "usa clau",
+        "cambia a cloud", "cambia a clouding", "cambia a cloude",
+        "usa el cloud", "usa el clouding",
+    ],
     "codex": ["usa codex", "cambia a codex", "usa el codex"],
     "opencode": ["usa opencode", "cambia a opencode", "usa el opencode"],
 }

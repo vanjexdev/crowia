@@ -76,6 +76,13 @@ class OpenCodeBackend(Backend):
             return f"[crowia] Error de OpenCode (rc={rc})"
 
         response = self._clean_output(stdout)
+        if not response or response == "[crowia] OpenCode no devolvió respuesta.":
+            stderr_clean = _ANSI.sub("", stderr).strip()
+            if stderr_clean:
+                err_lines = [l.strip() for l in stderr_clean.splitlines() if l.strip() and not l.strip().startswith(">")]
+                err_msg = " ".join(err_lines)
+                log.error("OpenCode stderr: %s", err_msg)
+                return f"[crowia] OpenCode error: {err_msg}"
         log.info("OpenCode response (%d chars): %s", len(response), response[:200])
         return response
 
