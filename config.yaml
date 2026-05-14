@@ -50,3 +50,8 @@ output:
   response_file: "/tmp/crowia/last_response.txt"
   tts_enabled: true
   tts_command: ["piper-tts", "--model", "/home/jesusu/.local/share/piper/es_ES-davefx-medium.onnx", "--output_raw"]
+
+skills:
+  path: "skills/"
+  enabled:
+    - cachyos-kde

@@ -9,6 +9,7 @@ from .backends.base import Backend
 from .backends.claude_cli import ClaudeCliBackend
 from .backends.codex import CodexBackend
 from .backends.opencode import OpenCodeBackend
+from . import skills as skills_mod
 
 log = logging.getLogger(__name__)
 
@@ -22,7 +23,9 @@ BACKENDS = {
 class Assistant:
     def __init__(self, cfg: dict):
         self._cfg = cfg
-        self.system_prompt = cfg["claude"]["system_prompt"]
+        base_prompt = cfg["claude"]["system_prompt"]
+        skill_text = skills_mod.load(cfg)
+        self.system_prompt = f"{base_prompt}\n\n{skill_text}" if skill_text else base_prompt
         self.timeout = cfg["claude"]["timeout_seconds"]
         self._cfg_api_key = cfg["claude"].get("api_key", "")
         self._api_client: anthropic.Anthropic | None = None
