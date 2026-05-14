@@ -36,7 +36,11 @@ _BACKEND_SWITCH = {
         "usa el cloud", "usa el clouding",
     ],
     "codex": ["usa codex", "cambia a codex", "usa el codex"],
-    "opencode": ["usa opencode", "cambia a opencode", "usa el opencode"],
+    "opencode": [
+        "usa opencode", "cambia a opencode", "usa el opencode",
+        "usa open code", "cambia a open code", "usa el open code",
+        "usa openco", "usa openko",
+    ],
 }
 
 _CLEAR_HISTORY_KW = [
