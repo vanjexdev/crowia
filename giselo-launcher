@@ -1,0 +1,327 @@
+#!/home/jesusu/Workspace/agents/crowia/.venv/bin/python3
+"""Giselo Launcher — gestor de instancias de crowia.py"""
+import json
+import os
+import pathlib
+import subprocess
+import sys
+import time
+import uuid
+
+os.environ.setdefault("WAYLAND_DISPLAY", "wayland-0")
+os.environ.setdefault("DISPLAY", ":0")
+uid = os.getuid()
+os.environ.setdefault("XDG_RUNTIME_DIR", f"/run/user/{uid}")
+os.environ.setdefault("DBUS_SESSION_BUS_ADDRESS", f"unix:path=/run/user/{uid}/bus")
+os.environ["QT_LOGGING_RULES"] = "*.debug=false;qt.qpa.*=false"
+
+from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtGui import QFont
+from PyQt6.QtWidgets import (
+    QApplication, QWidget, QVBoxLayout, QHBoxLayout,
+    QPushButton, QLabel, QDialog, QFormLayout, QLineEdit,
+    QComboBox, QDialogButtonBox, QFrame, QScrollArea,
+    QMessageBox,
+)
+
+INSTANCES_FILE = pathlib.Path.home() / ".config/crowia/instances.json"
+CROWIA_SCRIPT  = pathlib.Path(__file__).parent / "crowia.py"
+PYTHON         = pathlib.Path(__file__).parent / ".venv/bin/python3"
+
+BACKENDS = ["claude", "opencode", "codex"]
+
+HOTKEY_SUGGESTIONS = [
+    "KEY_RIGHTCTRL,KEY_GRAVE",
+    "KEY_LEFTCTRL,KEY_LEFTSHIFT,KEY_LEFTALT,KEY_1",
+    "KEY_LEFTCTRL,KEY_LEFTSHIFT,KEY_LEFTALT,KEY_2",
+    "KEY_LEFTCTRL,KEY_LEFTSHIFT,KEY_LEFTALT,KEY_3",
+    "KEY_LEFTCTRL,KEY_LEFTSHIFT,KEY_LEFTALT,KEY_F1",
+    "KEY_LEFTCTRL,KEY_LEFTSHIFT,KEY_LEFTALT,KEY_F2",
+]
+
+_procs: dict[str, subprocess.Popen] = {}
+
+
+def load_instances() -> list:
+    if INSTANCES_FILE.exists():
+        try:
+            return json.loads(INSTANCES_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    return []
+
+
+def save_instances(instances: list):
+    INSTANCES_FILE.parent.mkdir(parents=True, exist_ok=True)
+    INSTANCES_FILE.write_text(json.dumps(instances, indent=2, ensure_ascii=False))
+
+
+def is_running(inst_id: str) -> bool:
+    proc = _procs.get(inst_id)
+    return proc is not None and proc.poll() is None
+
+
+def launch(inst: dict):
+    inst_id = inst["id"]
+    if is_running(inst_id):
+        return
+    cmd = [
+        str(PYTHON), str(CROWIA_SCRIPT),
+        "--backend", inst["backend"],
+        "--hotkey", inst["hotkey"],
+    ]
+    env = os.environ.copy()
+    proc = subprocess.Popen(cmd, env=env)
+    _procs[inst_id] = proc
+
+
+def stop(inst_id: str):
+    proc = _procs.get(inst_id)
+    if proc and proc.poll() is None:
+        proc.terminate()
+        try:
+            proc.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+    _procs.pop(inst_id, None)
+
+
+# ── Create dialog ──────────────────────────────────────────────────────────────
+
+class CreateDialog(QDialog):
+    def __init__(self, parent=None, existing=None):
+        super().__init__(parent)
+        self.setWindowTitle("Nueva instancia" if not existing else "Editar instancia")
+        self.setMinimumWidth(420)
+
+        layout = QFormLayout(self)
+        layout.setSpacing(10)
+        layout.setContentsMargins(16, 16, 16, 16)
+
+        self._name = QLineEdit(existing["name"] if existing else "")
+        self._name.setPlaceholderText("Ej: Claude Principal")
+        layout.addRow("Nombre:", self._name)
+
+        self._backend = QComboBox()
+        self._backend.addItems(BACKENDS)
+        if existing:
+            idx = BACKENDS.index(existing["backend"]) if existing["backend"] in BACKENDS else 0
+            self._backend.setCurrentIndex(idx)
+        layout.addRow("Backend:", self._backend)
+
+        self._hotkey = QComboBox()
+        self._hotkey.setEditable(True)
+        self._hotkey.addItems(HOTKEY_SUGGESTIONS)
+        if existing:
+            self._hotkey.setCurrentText(existing["hotkey"])
+        else:
+            self._hotkey.setCurrentText(HOTKEY_SUGGESTIONS[0])
+        layout.addRow("Hotkey:", self._hotkey)
+
+        hint = QLabel(
+            "Teclas separadas por coma. Ej: KEY_LEFTCTRL,KEY_LEFTSHIFT,KEY_LEFTALT,KEY_1\n"
+            "Ver nombres: python3 -c \"from evdev import ecodes; "
+            "[print(k) for k in dir(ecodes) if k.startswith('KEY_')]\""
+        )
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color: #888; font-size: 11px;")
+        layout.addRow("", hint)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self._validate)
+        buttons.rejected.connect(self.reject)
+        layout.addRow(buttons)
+
+    def _validate(self):
+        if not self._hotkey.currentText().strip():
+            QMessageBox.warning(self, "Error", "El hotkey no puede estar vacío.")
+            return
+        self.accept()
+
+    def result_data(self) -> dict:
+        name = self._name.text().strip() or self._backend.currentText().capitalize()
+        return {
+            "name": name,
+            "backend": self._backend.currentText(),
+            "hotkey": self._hotkey.currentText().strip(),
+        }
+
+
+# ── Instance row widget ────────────────────────────────────────────────────────
+
+class InstanceRow(QFrame):
+    def __init__(self, inst: dict, on_remove, on_refresh):
+        super().__init__()
+        self._inst = inst
+        self._on_remove = on_remove
+        self._on_refresh = on_refresh
+
+        self.setFrameShape(QFrame.Shape.StyledPanel)
+        self.setStyleSheet("QFrame { border-radius: 6px; background: #1e1e2e; padding: 2px; }")
+
+        row = QHBoxLayout(self)
+        row.setContentsMargins(12, 8, 12, 8)
+        row.setSpacing(8)
+
+        self._status = QLabel("●")
+        self._status.setFixedWidth(16)
+        row.addWidget(self._status)
+
+        info = QVBoxLayout()
+        info.setSpacing(2)
+        self._name_lbl = QLabel(inst["name"])
+        self._name_lbl.setFont(QFont("Sans", 11, QFont.Weight.Bold))
+        self._name_lbl.setStyleSheet("color: #cdd6f4;")
+        info.addWidget(self._name_lbl)
+
+        detail = QLabel(f"{inst['backend']}  ·  {inst['hotkey']}")
+        detail.setStyleSheet("color: #6c7086; font-size: 11px;")
+        info.addWidget(detail)
+        row.addLayout(info)
+        row.addStretch()
+
+        self._btn_play = QPushButton("▶")
+        self._btn_play.setFixedSize(32, 32)
+        self._btn_play.setToolTip("Iniciar")
+        self._btn_play.clicked.connect(self._play)
+        row.addWidget(self._btn_play)
+
+        self._btn_stop = QPushButton("⏹")
+        self._btn_stop.setFixedSize(32, 32)
+        self._btn_stop.setToolTip("Detener")
+        self._btn_stop.clicked.connect(self._stop)
+        row.addWidget(self._btn_stop)
+
+        btn_del = QPushButton("🗑")
+        btn_del.setFixedSize(32, 32)
+        btn_del.setToolTip("Eliminar")
+        btn_del.clicked.connect(self._remove)
+        row.addWidget(btn_del)
+
+        self.refresh()
+
+    def refresh(self):
+        running = is_running(self._inst["id"])
+        self._status.setStyleSheet(f"color: {'#a6e3a1' if running else '#45475a'};")
+        self._btn_play.setEnabled(not running)
+        self._btn_stop.setEnabled(running)
+
+    def _play(self):
+        launch(self._inst)
+        QTimer.singleShot(500, self._on_refresh)
+
+    def _stop(self):
+        stop(self._inst["id"])
+        self._on_refresh()
+
+    def _remove(self):
+        if is_running(self._inst["id"]):
+            stop(self._inst["id"])
+        self._on_remove(self._inst["id"])
+
+
+# ── Main window ────────────────────────────────────────────────────────────────
+
+class LauncherWindow(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Giselo Launcher")
+        self.setMinimumWidth(500)
+        self.setMinimumHeight(300)
+        self.setStyleSheet("background: #181825; color: #cdd6f4;")
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(16, 16, 16, 16)
+        root.setSpacing(12)
+
+        header = QHBoxLayout()
+        title = QLabel("Giselo Launcher")
+        title.setFont(QFont("Sans", 14, QFont.Weight.Bold))
+        header.addWidget(title)
+        header.addStretch()
+        btn_create = QPushButton("+ Crear instancia")
+        btn_create.setStyleSheet(
+            "QPushButton { background: #89b4fa; color: #1e1e2e; border-radius: 5px; "
+            "padding: 6px 14px; font-weight: bold; }"
+            "QPushButton:hover { background: #b4d0ff; }"
+        )
+        btn_create.clicked.connect(self._create)
+        header.addWidget(btn_create)
+        root.addLayout(header)
+
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.HLine)
+        sep.setStyleSheet("color: #313244;")
+        root.addWidget(sep)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setStyleSheet("background: transparent;")
+
+        self._list_widget = QWidget()
+        self._list_layout = QVBoxLayout(self._list_widget)
+        self._list_layout.setContentsMargins(0, 0, 0, 0)
+        self._list_layout.setSpacing(8)
+        self._list_layout.addStretch()
+        scroll.setWidget(self._list_widget)
+        root.addWidget(scroll)
+
+        self._instances: list = load_instances()
+        self._rows: dict[str, InstanceRow] = {}
+        self._rebuild_rows()
+
+        timer = QTimer(self)
+        timer.timeout.connect(self._refresh_all)
+        timer.start(1500)
+
+    def _rebuild_rows(self):
+        for row in self._rows.values():
+            row.setParent(None)
+        self._rows.clear()
+
+        stretch = self._list_layout.takeAt(self._list_layout.count() - 1)
+        for inst in self._instances:
+            row = InstanceRow(inst, self._remove, self._refresh_all)
+            self._list_layout.addWidget(row)
+            self._rows[inst["id"]] = row
+        self._list_layout.addStretch() if stretch else self._list_layout.addStretch()
+
+        if not self._instances:
+            empty = QLabel("Sin instancias. Haz clic en '+ Crear instancia'.")
+            empty.setStyleSheet("color: #6c7086; font-size: 12px;")
+            empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self._list_layout.insertWidget(0, empty)
+
+    def _refresh_all(self):
+        for row in self._rows.values():
+            row.refresh()
+
+    def _create(self):
+        dlg = CreateDialog(self)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        data = dlg.result_data()
+        data["id"] = str(uuid.uuid4())[:8]
+        self._instances.append(data)
+        save_instances(self._instances)
+        self._rebuild_rows()
+
+    def _remove(self, inst_id: str):
+        self._instances = [i for i in self._instances if i["id"] != inst_id]
+        save_instances(self._instances)
+        self._rebuild_rows()
+
+
+def main():
+    app = QApplication(sys.argv)
+    app.setApplicationName("Giselo Launcher")
+    win = LauncherWindow()
+    win.show()
+    sys.exit(app.exec())
+
+
+if __name__ == "__main__":
+    main()
