@@ -38,6 +38,7 @@ def main():
     parser = argparse.ArgumentParser(description="crowia — voice assistant")
     parser.add_argument("--config", default=str(PROJECT_ROOT / "config.yaml"))
     parser.add_argument("--debug", action="store_true")
+    parser.add_argument("--no-ui", action="store_true", help="Disable graphical overlay")
     parser.add_argument("--list-devices", action="store_true",
                         help="List keyboard input devices and exit")
     parser.add_argument("--always-on", action="store_true",
@@ -58,6 +59,20 @@ def main():
                 print(f"[!!] {path}  [PERMISSION DENIED]")
         return
 
+    # Qt must be initialized before anything else that touches the display
+    overlay = None
+    qt_app = None
+    if not args.no_ui:
+        try:
+            from PyQt6.QtWidgets import QApplication
+            from crowia.ui import CrowiaOverlay
+            qt_app = QApplication(sys.argv)
+            overlay = CrowiaOverlay()
+            overlay.show()
+        except Exception as e:
+            logging.getLogger("crowia").warning("UI unavailable: %s", e)
+            overlay = None
+
     cfg = load_config(args.config)
     log = logging.getLogger("crowia")
 
@@ -75,49 +90,52 @@ def main():
     pipeline_lock = threading.Lock()
     safety_timer: threading.Timer | None = None
 
+    def ui(state: str):
+        if overlay:
+            overlay.notify(state)
+
     def run_pipeline():
         wav = recorder.wav_path
         if wav is None or not wav.exists():
             log.warning("No WAV file after recording")
             return
 
+        ui("processing")
         output.show_status("Transcribiendo…")
         try:
             text = transcriber.transcribe(wav)
         except Exception as e:
             log.error("Transcription error: %s", e)
             output.show_status(f"Error de transcripción: {e}")
+            ui("idle")
             return
         finally:
             recorder.cleanup(wav)
 
         if not text:
             output.show_status("No se escuchó nada.")
+            ui("idle")
             return
 
         log.info("Transcribed: %s", text)
-
         intents = intent.detect(text)
 
-        # Clear history
         if intents.clear_history:
             history.clear()
             output.show("Crowia", "Historial borrado.")
+            ui("done")
             return
 
-        # Volume control — handled immediately, no Claude needed
         if intents.volume is not None and not intents.screenshot and not intents.files:
             result = system_control.control_volume(intents.volume)
             output.show("Control de sistema", result)
+            ui("done")
             return
 
-        # Screenshot
         screenshot_path: pathlib.Path | None = None
         if intents.screenshot:
             output.show_status("Capturando pantalla…")
             screenshot_path = screen.take_screenshot()
-            if not screenshot_path:
-                output.show_status("Error: grim no disponible.")
 
         output.show_status(f"Preguntando a Claude: {text[:50]}…")
 
@@ -131,19 +149,19 @@ def main():
         except Exception as e:
             log.error("Claude error: %s", e)
             output.show_status(f"Error de Claude: {e}")
+            ui("idle")
             return
         finally:
             if screenshot_path and screenshot_path.exists():
                 screenshot_path.unlink(missing_ok=True)
 
-        # Also apply volume if mixed intent (e.g. "sube el volumen y dime X")
-        if intents.volume is not None and (intents.screenshot or intents.files or True):
+        if intents.volume is not None:
             system_control.control_volume(intents.volume)
 
         history.add("user", text)
         history.add("assistant", response)
-
         output.show(text, response)
+        ui("done")
 
     def on_start():
         nonlocal safety_timer
@@ -151,6 +169,7 @@ def main():
             log.warning("Pipeline already running, ignoring start")
             return
         log.info("Recording started")
+        ui("recording")
         output.show_status("Grabando…")
         recorder.start()
 
@@ -166,6 +185,7 @@ def main():
             safety_timer.cancel()
             safety_timer = None
         log.info("Recording stopped")
+        ui("processing")
         output.show_status("Procesando…")
         recorder.stop()
         t = threading.Thread(target=_pipeline_wrapper, daemon=True)
@@ -177,9 +197,10 @@ def main():
 
     if args.always_on:
         ao_cfg = cfg.get("always_on", {})
-        wake_phrases = ao_cfg.get("wake_phrases", ["oye crowia", "hey crowia"])
+        wake_phrases = ao_cfg.get("wake_phrases", ["oye pepito", "hey pepito"])
 
         def on_speech_ready(wav_path):
+            ui("processing")
             output.show_status("Procesando…")
             t = threading.Thread(target=_pipeline_from_wav, args=(wav_path,), daemon=True)
             t.start()
@@ -194,13 +215,15 @@ def main():
                 text = transcriber.transcribe(wav_path)
             except Exception as e:
                 log.error("Transcription error: %s", e)
-                output.show_status(f"Error de transcripción: {e}")
+                output.show_status(f"Error: {e}")
+                ui("idle")
                 return
             finally:
                 wav_path.unlink(missing_ok=True)
 
             if not text:
                 output.show_status("No se escuchó nada.")
+                ui("idle")
                 return
 
             log.info("Transcribed: %s", text)
@@ -209,11 +232,13 @@ def main():
             if intents.clear_history:
                 history.clear()
                 output.show("Crowia", "Historial borrado.")
+                ui("done")
                 return
 
             if intents.volume is not None and not intents.screenshot and not intents.files:
                 result = system_control.control_volume(intents.volume)
                 output.show("Sistema", result)
+                ui("done")
                 return
 
             screenshot_path = None
@@ -232,6 +257,7 @@ def main():
             except Exception as e:
                 log.error("Claude error: %s", e)
                 output.show_status(f"Error: {e}")
+                ui("idle")
                 return
             finally:
                 if screenshot_path and screenshot_path.exists():
@@ -243,17 +269,20 @@ def main():
             history.add("user", text)
             history.add("assistant", response)
             output.show(text, response)
+            ui("done")
 
         listener = AlwaysOnListener(
             cfg=cfg,
             on_speech_ready=on_speech_ready,
             transcriber=transcriber,
-            on_wake=lambda: output.show_status("Escuchando…"),
-            on_idle=lambda: output.show_status(f"Di '{wake_phrases[0]}' para activar"),
+            on_wake=lambda: (ui("recording"), output.show_status("Escuchando…")),
+            on_idle=lambda: (ui("idle"), output.show_status(f"Di '{wake_phrases[0]}' para activar")),
         )
         log.info("crowia listo. Modo: always-on | Wake: %s | Whisper: %s",
                  wake_phrases, cfg["whisper"]["model"])
-        listener.run()
+        t = threading.Thread(target=listener.run, daemon=True)
+        t.start()
+
     else:
         listener = HotkeyListener(
             key_names=cfg["hotkey"]["keys"],
@@ -268,7 +297,21 @@ def main():
             cfg["whisper"]["model"],
             cfg["claude"].get("model", "claude-sonnet-4-6"),
         )
-        asyncio.run(listener.run())
+        t = threading.Thread(target=lambda: asyncio.run(listener.run()), daemon=True)
+        t.start()
+
+    if qt_app:
+        import signal
+        signal.signal(signal.SIGINT, lambda *_: qt_app.quit())
+        # Timer trick: let Python check signals every 500ms (Qt blocks signal delivery)
+        from PyQt6.QtCore import QTimer
+        sig_timer = QTimer()
+        sig_timer.start(500)
+        sig_timer.timeout.connect(lambda: None)
+        sys.exit(qt_app.exec())
+    else:
+        # No UI — block main thread
+        threading.Event().wait()
 
 
 if __name__ == "__main__":
