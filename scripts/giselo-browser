@@ -79,11 +79,24 @@ def kill_stale():
     SOCKET_PATH.unlink(missing_ok=True)
 
 
+BROWSER_TYPE_FILE = pathlib.Path("/tmp/crowia/browser_type.txt")
+
+
+def running_browser_type() -> str:
+    try:
+        return BROWSER_TYPE_FILE.read_text().strip()
+    except Exception:
+        return ""
+
+
 def start_daemon():
     if is_running():
-        return
-    # Kill any stale instances first
-    kill_stale()
+        # If browser type changed, force restart
+        if running_browser_type() == BROWSER_TYPE:
+            return
+        kill_stale()
+    else:
+        kill_stale()
     uid = os.getuid()
     env = os.environ.copy()
     env.setdefault("WAYLAND_DISPLAY", "wayland-0")

@@ -264,6 +264,7 @@ async def main():
     PROFILE_DIR.mkdir(parents=True, exist_ok=True)
     SOCKET_PATH.unlink(missing_ok=True)
     PID_FILE.write_text(str(os.getpid()))
+    pathlib.Path("/tmp/crowia/browser_type.txt").write_text(BROWSER_TYPE)
 
     async with async_playwright() as pw:
         if BROWSER_TYPE == "firefox":
