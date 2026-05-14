@@ -30,13 +30,23 @@ PYTHON         = pathlib.Path(__file__).parent / ".venv/bin/python3"
 
 BACKENDS = ["claude", "opencode", "codex"]
 
+# (label_visible, evdev_string)
 HOTKEY_SUGGESTIONS = [
-    "KEY_RIGHTCTRL,KEY_GRAVE",
-    "KEY_LEFTCTRL,KEY_LEFTSHIFT,KEY_LEFTALT,KEY_1",
-    "KEY_LEFTCTRL,KEY_LEFTSHIFT,KEY_LEFTALT,KEY_2",
-    "KEY_LEFTCTRL,KEY_LEFTSHIFT,KEY_LEFTALT,KEY_3",
-    "KEY_LEFTCTRL,KEY_LEFTSHIFT,KEY_LEFTALT,KEY_F1",
-    "KEY_LEFTCTRL,KEY_LEFTSHIFT,KEY_LEFTALT,KEY_F2",
+    ("Ctrl der + `",                    "KEY_RIGHTCTRL,KEY_GRAVE"),
+    ("Ctrl + Shift + Alt + 1",          "KEY_LEFTCTRL,KEY_LEFTSHIFT,KEY_LEFTALT,KEY_1"),
+    ("Ctrl + Shift + Alt + 2",          "KEY_LEFTCTRL,KEY_LEFTSHIFT,KEY_LEFTALT,KEY_2"),
+    ("Ctrl + Shift + Alt + 3",          "KEY_LEFTCTRL,KEY_LEFTSHIFT,KEY_LEFTALT,KEY_3"),
+    ("Ctrl + Shift der + Alt + 1",      "KEY_LEFTCTRL,KEY_RIGHTSHIFT,KEY_LEFTALT,KEY_1"),
+    ("Ctrl + Shift der + Alt + 2",      "KEY_LEFTCTRL,KEY_RIGHTSHIFT,KEY_LEFTALT,KEY_2"),
+    ("Ctrl der + Shift + 1",            "KEY_RIGHTCTRL,KEY_LEFTSHIFT,KEY_1"),
+    ("Ctrl der + Shift + 2",            "KEY_RIGHTCTRL,KEY_LEFTSHIFT,KEY_2"),
+    ("Ctrl der + Alt + 1",              "KEY_RIGHTCTRL,KEY_LEFTALT,KEY_1"),
+    ("Ctrl der + Alt + 2",              "KEY_RIGHTCTRL,KEY_LEFTALT,KEY_2"),
+    ("Ctrl der + Shift der + 1",        "KEY_RIGHTCTRL,KEY_RIGHTSHIFT,KEY_1"),
+    ("Ctrl der + Shift der + 2",        "KEY_RIGHTCTRL,KEY_RIGHTSHIFT,KEY_2"),
+    ("Ctrl + Shift + Alt + F1",         "KEY_LEFTCTRL,KEY_LEFTSHIFT,KEY_LEFTALT,KEY_F1"),
+    ("Ctrl + Shift + Alt + F2",         "KEY_LEFTCTRL,KEY_LEFTSHIFT,KEY_LEFTALT,KEY_F2"),
+    ("Ctrl + Shift + Alt + F3",         "KEY_LEFTCTRL,KEY_LEFTSHIFT,KEY_LEFTALT,KEY_F3"),
 ]
 
 _procs: dict[str, subprocess.Popen] = {}
@@ -111,18 +121,23 @@ class CreateDialog(QDialog):
 
         self._hotkey = QComboBox()
         self._hotkey.setEditable(True)
-        self._hotkey.addItems(HOTKEY_SUGGESTIONS)
+        for label, evdev in HOTKEY_SUGGESTIONS:
+            self._hotkey.addItem(label, userData=evdev)
         if existing:
-            self._hotkey.setCurrentText(existing["hotkey"])
+            # try to match evdev string → show its label; fallback to raw text
+            matched = False
+            for i, (_, evdev) in enumerate(HOTKEY_SUGGESTIONS):
+                if evdev == existing["hotkey"]:
+                    self._hotkey.setCurrentIndex(i)
+                    matched = True
+                    break
+            if not matched:
+                self._hotkey.setCurrentText(existing["hotkey"])
         else:
-            self._hotkey.setCurrentText(HOTKEY_SUGGESTIONS[0])
+            self._hotkey.setCurrentIndex(0)
         layout.addRow("Hotkey:", self._hotkey)
 
-        hint = QLabel(
-            "Teclas separadas por coma. Ej: KEY_LEFTCTRL,KEY_LEFTSHIFT,KEY_LEFTALT,KEY_1\n"
-            "Ver nombres: python3 -c \"from evdev import ecodes; "
-            "[print(k) for k in dir(ecodes) if k.startswith('KEY_')]\""
-        )
+        hint = QLabel("Selecciona una combinación o escribe teclas evdev separadas por coma.")
         hint.setWordWrap(True)
         hint.setStyleSheet("color: #888; font-size: 11px;")
         layout.addRow("", hint)
@@ -142,10 +157,20 @@ class CreateDialog(QDialog):
 
     def result_data(self) -> dict:
         name = self._name.text().strip() or self._backend.currentText().capitalize()
+        # Use userData (evdev string) if item was selected from list;
+        # otherwise the user typed a custom evdev string directly.
+        idx = self._hotkey.currentIndex()
+        user_data = self._hotkey.itemData(idx) if idx >= 0 else None
+        current_text = self._hotkey.currentText().strip()
+        # If currentText matches the label at idx, use evdev userData
+        if user_data and self._hotkey.itemText(idx) == current_text:
+            hotkey = user_data
+        else:
+            hotkey = current_text  # custom typed evdev string
         return {
             "name": name,
             "backend": self._backend.currentText(),
-            "hotkey": self._hotkey.currentText().strip(),
+            "hotkey": hotkey,
         }
 
 
@@ -176,7 +201,8 @@ class InstanceRow(QFrame):
         self._name_lbl.setStyleSheet("color: #cdd6f4;")
         info.addWidget(self._name_lbl)
 
-        detail = QLabel(f"{inst['backend']}  ·  {inst['hotkey']}")
+        hotkey_label = next((lbl for lbl, ev in HOTKEY_SUGGESTIONS if ev == inst["hotkey"]), inst["hotkey"])
+        detail = QLabel(f"{inst['backend']}  ·  {hotkey_label}")
         detail.setStyleSheet("color: #6c7086; font-size: 11px;")
         info.addWidget(detail)
         row.addLayout(info)
