@@ -27,20 +27,20 @@ _VOLUME_MUTE_KW = [
     "silencia el audio", "quita el sonido",
 ]
 
+def _sw(names: list[str]) -> list[str]:
+    verbs = ["usa", "uses", "utiliza", "utilices", "cambia a", "cambiar a"]
+    out = []
+    for v in verbs:
+        for n in names:
+            out.append(f"{v} {n}")
+            out.append(f"{v} el {n}")
+    return out
+
+
 _BACKEND_SWITCH = {
-    "claude": [
-        "usa claude", "cambia a claude", "usa el claude",
-        # Whisper mis-transcriptions of "Claude" in Spanish context
-        "usa cloud", "usa clouding", "usa cloude", "usa clod", "usa clau",
-        "cambia a cloud", "cambia a clouding", "cambia a cloude",
-        "usa el cloud", "usa el clouding",
-    ],
-    "codex": ["usa codex", "cambia a codex", "usa el codex"],
-    "opencode": [
-        "usa opencode", "cambia a opencode", "usa el opencode",
-        "usa open code", "cambia a open code", "usa el open code",
-        "usa openco", "usa openko",
-    ],
+    "claude": _sw(["claude", "cloud", "clouding", "cloude", "clod", "clau"]),
+    "codex": _sw(["codex"]),
+    "opencode": _sw(["opencode", "open code", "openco", "openko"]),
 }
 
 _CLEAR_HISTORY_KW = [
