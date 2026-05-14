@@ -1,7 +1,7 @@
+import json
 import logging
 import os
 import pathlib
-import re
 import shutil
 import subprocess
 import threading
@@ -9,8 +9,6 @@ import threading
 from .base import Backend
 
 log = logging.getLogger(__name__)
-
-_ANSI = re.compile(r'\x1b\[[0-9;]*m')
 
 
 class OpenCodeBackend(Backend):
@@ -50,7 +48,7 @@ class OpenCodeBackend(Backend):
         cmd = [
             self._binary, "run",
             "--model", self._model,
-            "--dangerously-skip-permissions",
+            "--format", "json",
             full_text,
         ]
 
@@ -75,24 +73,25 @@ class OpenCodeBackend(Backend):
             log.error("OpenCode error (rc=%d): %s", rc, stderr[:300])
             return f"[crowia] Error de OpenCode (rc={rc})"
 
-        response = self._clean_output(stdout)
-        if not response or response == "[crowia] OpenCode no devolvió respuesta.":
-            stderr_clean = _ANSI.sub("", stderr).strip()
-            if stderr_clean:
-                err_lines = [l.strip() for l in stderr_clean.splitlines() if l.strip() and not l.strip().startswith(">")]
-                err_msg = " ".join(err_lines)
-                log.error("OpenCode stderr: %s", err_msg)
-                return f"[crowia] OpenCode error: {err_msg}"
+        response = self._parse_json_output(stdout)
+        if not response:
+            log.error("OpenCode empty response. stderr: %s", stderr[:300])
+            return "[crowia] OpenCode no devolvió respuesta."
         log.info("OpenCode response (%d chars): %s", len(response), response[:200])
         return response
 
-    def _clean_output(self, output: str) -> str:
-        lines = []
+    def _parse_json_output(self, output: str) -> str:
+        parts = []
         for line in output.splitlines():
-            clean = _ANSI.sub("", line).strip()
-            if not clean:
+            line = line.strip()
+            if not line:
                 continue
-            if clean.startswith(">"):  # header line "> build · model"
+            try:
+                event = json.loads(line)
+                if event.get("type") == "text":
+                    text = event.get("part", {}).get("text", "")
+                    if text:
+                        parts.append(text)
+            except json.JSONDecodeError:
                 continue
-            lines.append(clean)
-        return "\n".join(lines).strip() or "[crowia] OpenCode no devolvió respuesta."
+        return "".join(parts).strip()
