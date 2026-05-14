@@ -127,7 +127,10 @@ def main():
             return
 
         log.info("Transcribed: %s", text)
+        log.debug("Detecting intents...")
         intents = intent.detect(text)
+        log.debug("Intents: screenshot=%s volume=%s files=%s backend=%s",
+                  intents.screenshot, intents.volume, intents.files, intents.switch_backend)
 
         if intents.switch_backend:
             msg = assistant.switch_backend(intents.switch_backend)
@@ -154,6 +157,7 @@ def main():
             output.show_status("Capturando pantalla…")
             screenshot_path = screen.take_screenshot()
 
+        log.debug("Calling assistant.ask (backend=%s)...", assistant.current_backend_name)
         output.show_status(f"Preguntando a Claude: {text[:50]}…")
 
         try:

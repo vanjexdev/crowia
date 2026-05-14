@@ -1,0 +1,15 @@
+#!/bin/bash
+# Ejecutado por systemd cuando dispara un recordatorio.
+export DISPLAY=:0
+export WAYLAND_DISPLAY=wayland-0
+export XDG_RUNTIME_DIR=/run/user/$(id -u)
+export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus
+
+MSG="$*"
+
+notify-send --urgency=critical --expire-time=12000 "🔔 Recordatorio" "$MSG" 2>/dev/null || true
+
+echo "$MSG" | piper-tts \
+    --model "$HOME/.local/share/piper/es_ES-davefx-medium.onnx" \
+    --output_raw 2>/dev/null \
+    | aplay -r 22050 -f S16_LE -t raw - 2>/dev/null || true

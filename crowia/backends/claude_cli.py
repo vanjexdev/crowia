@@ -17,7 +17,7 @@ class ClaudeCliBackend(Backend):
         self._binary = cfg["claude"]["binary"] or shutil.which("claude") or ""
         self._model = cfg["claude"].get("model", "claude-haiku-4-5")
         tools = cfg["claude"].get("allowed_tools",
-            "WebSearch Bash(git *) Bash(zeditor*) Bash(alacritty*) Bash(firefox*) Bash(giselo-ask*) Bash(giselo-askpass*) Bash(giselo-pick*) Bash(giselo-browser*) Bash(giselo-google*) Read Edit Write")
+            "WebSearch Bash(git *) Bash(zeditor*) Bash(alacritty*) Bash(firefox*) Bash(giselo-ask*) Bash(giselo-askpass*) Bash(giselo-pick*) Bash(giselo-browser*) Bash(giselo-google*) Bash(giselo-remind*) Read Edit Write")
         self._allowed_tools = tools
         self._disallowed_tools = cfg["claude"].get("disallowed_tools", "Bash(git push*)")
         self._proc: subprocess.Popen | None = None

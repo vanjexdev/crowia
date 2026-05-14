@@ -179,10 +179,11 @@ def calendar_calendars():
 
 def calendar_list(days=7):
     svc = build("calendar", "v3", credentials=get_credentials())
-    now = datetime.datetime.utcnow()
+    tz = _local_tz()
+    now = datetime.datetime.now(tz)
     end = now + datetime.timedelta(days=days)
-    time_min = now.isoformat() + "Z"
-    time_max = end.isoformat() + "Z"
+    time_min = now.isoformat()
+    time_max = end.isoformat()
 
     all_events = []
     for cal_id, cal_name in _get_all_calendar_ids(svc):
@@ -198,11 +199,20 @@ def calendar_list(days=7):
         print(_fmt_event(e, cal_name))
 
 
+def _local_tz() -> datetime.tzinfo:
+    now = datetime.datetime.now()
+    offset = now.astimezone().utcoffset()
+    if offset is None:
+        offset = datetime.timedelta(0)
+    return datetime.timezone(offset)
+
+
 def calendar_today():
     svc = build("calendar", "v3", credentials=get_credentials())
+    tz = _local_tz()
     today = datetime.datetime.now().date()
-    time_min = datetime.datetime.combine(today, datetime.time.min).isoformat() + "Z"
-    time_max = datetime.datetime.combine(today, datetime.time.max).isoformat() + "Z"
+    time_min = datetime.datetime.combine(today, datetime.time.min).replace(tzinfo=tz).isoformat()
+    time_max = datetime.datetime.combine(today, datetime.time.max).replace(tzinfo=tz).isoformat()
 
     all_events = []
     for cal_id, cal_name in _get_all_calendar_ids(svc):
