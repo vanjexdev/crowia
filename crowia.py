@@ -98,6 +98,7 @@ def main():
 
     if overlay:
         overlay._on_cancel = on_cancel
+        overlay.set_backend(assistant.current_backend_name)
     output = OutputHandler(cfg)
 
     history_cfg = cfg.get("history", {})
