@@ -30,7 +30,7 @@ codex:
   model: ""  # dejar vacío para usar el default de codex
 
 opencode:
-  model: "opencode/big-pickle"  # ver modelos: opencode models
+  model: "opencode/minimax-m2.5-free"  # ver modelos: opencode models
 
 always_on:
   wake_phrases: ["oye giselo", "hey giselo", "giselo"]

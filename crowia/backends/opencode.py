@@ -49,6 +49,7 @@ class OpenCodeBackend(Backend):
             self._binary, "run",
             "--model", self._model,
             "--format", "json",
+            "--dangerously-skip-permissions",
             full_text,
         ]
 
