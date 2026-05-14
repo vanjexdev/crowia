@@ -1,9 +1,10 @@
 #!/home/jesusu/Workspace/agents/crowia/.venv/bin/python3
 """
-giselo-browser-daemon
-Persistent Firefox browser via Playwright. Listens on Unix socket.
+giselo-browser-daemon [--browser firefox|chromium|chrome]
+Persistent browser via Playwright. Listens on Unix socket.
 Started automatically by giselo-browser — do not call directly.
 """
+import argparse
 import asyncio
 import json
 import logging
@@ -21,11 +22,15 @@ os.environ.setdefault("MOZ_ENABLE_WAYLAND", "1")
 
 from playwright.async_api import async_playwright, Page, BrowserContext
 
-SOCKET_PATH = pathlib.Path("/tmp/crowia/browser.sock")
-PID_FILE    = pathlib.Path("/tmp/crowia/browser.pid")
-PROFILE_DIR = pathlib.Path.home() / ".config/crowia/browser-profile/firefox"
-LOG_FILE    = pathlib.Path("/tmp/crowia/browser.log")
-EXTRACT_MAX = 10_000
+_args = argparse.ArgumentParser()
+_args.add_argument("--browser", default="firefox", choices=["firefox", "chromium", "chrome"])
+BROWSER_TYPE = _args.parse_args().browser
+
+SOCKET_PATH  = pathlib.Path("/tmp/crowia/browser.sock")
+PID_FILE     = pathlib.Path("/tmp/crowia/browser.pid")
+PROFILE_DIR  = pathlib.Path.home() / f".config/crowia/browser-profile/{BROWSER_TYPE}"
+LOG_FILE     = pathlib.Path("/tmp/crowia/browser.log")
+EXTRACT_MAX  = 10_000
 
 logging.basicConfig(
     level=logging.INFO,
@@ -258,14 +263,22 @@ async def main():
 
     PROFILE_DIR.mkdir(parents=True, exist_ok=True)
     SOCKET_PATH.unlink(missing_ok=True)
+    PID_FILE.write_text(str(os.getpid()))
 
     async with async_playwright() as pw:
-        context = await pw.firefox.launch_persistent_context(
-            str(PROFILE_DIR),
-            headless=False,
-            args=["--new-window"],
-        )
-        log.info("Firefox listo. Perfil: %s", PROFILE_DIR)
+        if BROWSER_TYPE == "firefox":
+            context = await pw.firefox.launch_persistent_context(
+                str(PROFILE_DIR), headless=False,
+            )
+        elif BROWSER_TYPE == "chrome":
+            context = await pw.chromium.launch_persistent_context(
+                str(PROFILE_DIR), headless=False, channel="chrome",
+            )
+        else:  # chromium (bundled Playwright)
+            context = await pw.chromium.launch_persistent_context(
+                str(PROFILE_DIR), headless=False,
+            )
+        log.info("%s listo. Perfil: %s", BROWSER_TYPE, PROFILE_DIR)
 
         server = await asyncio.start_unix_server(handle_client, str(SOCKET_PATH))
         log.info("Socket listo: %s", SOCKET_PATH)

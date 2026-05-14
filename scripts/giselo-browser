@@ -34,6 +34,18 @@ SOCKET_PATH = pathlib.Path("/tmp/crowia/browser.sock")
 PID_FILE    = pathlib.Path("/tmp/crowia/browser.pid")
 DAEMON      = pathlib.Path(__file__).parent / "giselo-browser-daemon"
 LOG_FILE    = pathlib.Path("/tmp/crowia/browser.log")
+CONFIG_FILE = pathlib.Path(__file__).parent.parent / "config.yaml"
+
+# Read browser type from config.yaml (default: firefox)
+def _read_browser_type() -> str:
+    try:
+        import yaml
+        cfg = yaml.safe_load(CONFIG_FILE.read_text())
+        return cfg.get("browser", {}).get("type", "firefox")
+    except Exception:
+        return "firefox"
+
+BROWSER_TYPE = _read_browser_type()
 
 
 def is_running() -> bool:
@@ -41,6 +53,7 @@ def is_running() -> bool:
         return False
     try:
         s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.settimeout(2)
         s.connect(str(SOCKET_PATH))
         s.close()
         return True
@@ -48,9 +61,29 @@ def is_running() -> bool:
         return False
 
 
+def kill_stale():
+    """Kill any lingering daemon processes and clean up socket."""
+    try:
+        result = subprocess.run(
+            ["pgrep", "-f", "giselo-browser-daemon"],
+            capture_output=True, text=True
+        )
+        for pid in result.stdout.strip().split():
+            try:
+                os.kill(int(pid), 15)  # SIGTERM
+            except ProcessLookupError:
+                pass
+        time.sleep(0.5)
+    except Exception:
+        pass
+    SOCKET_PATH.unlink(missing_ok=True)
+
+
 def start_daemon():
     if is_running():
         return
+    # Kill any stale instances first
+    kill_stale()
     uid = os.getuid()
     env = os.environ.copy()
     env.setdefault("WAYLAND_DISPLAY", "wayland-0")
@@ -59,19 +92,19 @@ def start_daemon():
     env.setdefault("DBUS_SESSION_BUS_ADDRESS", f"unix:path=/run/user/{uid}/bus")
     env.setdefault("MOZ_ENABLE_WAYLAND", "1")
     pathlib.Path("/tmp/crowia").mkdir(parents=True, exist_ok=True)
-    log = open(LOG_FILE, "a")
+    log_f = open(LOG_FILE, "a")
     subprocess.Popen(
-        [str(DAEMON)],
+        [str(DAEMON), "--browser", BROWSER_TYPE],
         start_new_session=True,
-        stdout=log,
-        stderr=log,
+        stdout=log_f,
+        stderr=log_f,
         env=env,
     )
-    for _ in range(30):
+    for _ in range(40):
         if is_running():
             return
         time.sleep(0.3)
-    print("Error: daemon no respondió a tiempo. Revisa /tmp/crowia/browser.log", file=sys.stderr)
+    print("Error: daemon no respondió. Revisa /tmp/crowia/browser.log", file=sys.stderr)
     sys.exit(1)
 
 
