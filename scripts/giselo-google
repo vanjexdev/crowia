@@ -133,50 +133,89 @@ def gmail_search(query: str, limit=10):
 
 # ── Calendar ──────────────────────────────────────────────────────────────────
 
-def _fmt_event(e: dict) -> str:
+def _fmt_event(e: dict, cal_name: str = "") -> str:
     start = e.get("start", {})
     dt = start.get("dateTime", start.get("date", ""))[:16]
     summary = e.get("summary", "(sin título)")
     location = e.get("location", "")
     loc = f" @ {location}" if location else ""
-    return f"[{dt}] {summary}{loc}"
+    cal = f" [{cal_name}]" if cal_name else ""
+    return f"[{dt}] {summary}{loc}{cal}"
+
+
+def _get_all_calendar_ids(svc) -> list[tuple[str, str]]:
+    """Returns list of (calendarId, summary) for all writable calendars."""
+    result = []
+    page_token = None
+    while True:
+        cal_list = svc.calendarList().list(pageToken=page_token).execute()
+        for cal in cal_list.get("items", []):
+            result.append((cal["id"], cal.get("summary", cal["id"])))
+        page_token = cal_list.get("nextPageToken")
+        if not page_token:
+            break
+    return result
+
+
+def _query_events(svc, cal_id: str, time_min: str, time_max: str, max_results=20) -> list[dict]:
+    try:
+        res = svc.events().list(
+            calendarId=cal_id,
+            timeMin=time_min, timeMax=time_max,
+            maxResults=max_results,
+            singleEvents=True,
+            orderBy="startTime",
+        ).execute()
+        return res.get("items", [])
+    except Exception:
+        return []
+
+
+def calendar_calendars():
+    svc = build("calendar", "v3", credentials=get_credentials())
+    for cal_id, name in _get_all_calendar_ids(svc):
+        print(f"{name}: {cal_id}")
 
 
 def calendar_list(days=7):
     svc = build("calendar", "v3", credentials=get_credentials())
     now = datetime.datetime.utcnow()
     end = now + datetime.timedelta(days=days)
-    res = svc.events().list(
-        calendarId="primary",
-        timeMin=now.isoformat() + "Z",
-        timeMax=end.isoformat() + "Z",
-        maxResults=20,
-        singleEvents=True,
-        orderBy="startTime",
-    ).execute()
-    events = res.get("items", [])
-    if not events:
+    time_min = now.isoformat() + "Z"
+    time_max = end.isoformat() + "Z"
+
+    all_events = []
+    for cal_id, cal_name in _get_all_calendar_ids(svc):
+        for e in _query_events(svc, cal_id, time_min, time_max):
+            all_events.append((e, cal_name))
+
+    all_events.sort(key=lambda x: x[0].get("start", {}).get("dateTime", x[0].get("start", {}).get("date", "")))
+
+    if not all_events:
         print(f"Sin eventos en los próximos {days} días.")
         return
-    for e in events:
-        print(_fmt_event(e))
+    for e, cal_name in all_events:
+        print(_fmt_event(e, cal_name))
 
 
 def calendar_today():
     svc = build("calendar", "v3", credentials=get_credentials())
     today = datetime.datetime.now().date()
-    start = datetime.datetime.combine(today, datetime.time.min).isoformat() + "Z"
-    end   = datetime.datetime.combine(today, datetime.time.max).isoformat() + "Z"
-    res = svc.events().list(
-        calendarId="primary", timeMin=start, timeMax=end,
-        singleEvents=True, orderBy="startTime",
-    ).execute()
-    events = res.get("items", [])
-    if not events:
+    time_min = datetime.datetime.combine(today, datetime.time.min).isoformat() + "Z"
+    time_max = datetime.datetime.combine(today, datetime.time.max).isoformat() + "Z"
+
+    all_events = []
+    for cal_id, cal_name in _get_all_calendar_ids(svc):
+        for e in _query_events(svc, cal_id, time_min, time_max):
+            all_events.append((e, cal_name))
+
+    all_events.sort(key=lambda x: x[0].get("start", {}).get("dateTime", x[0].get("start", {}).get("date", "")))
+
+    if not all_events:
         print("Sin eventos hoy.")
         return
-    for e in events:
-        print(_fmt_event(e))
+    for e, cal_name in all_events:
+        print(_fmt_event(e, cal_name))
 
 
 def calendar_week():
@@ -259,12 +298,14 @@ def main():
             duration = int(rest[i + 1])
             rest = rest[:i] + rest[i + 2:]
 
-        if action == "list":
+        if action in ("list", ""):
             calendar_list(days=days)
         elif action == "today":
             calendar_today()
         elif action == "week":
             calendar_week()
+        elif action in ("calendars", "all"):
+            calendar_calendars()
         elif action == "add":
             if len(rest) < 2:
                 print("Uso: giselo-google calendar add <titulo> <cuando>", file=sys.stderr); sys.exit(1)
