@@ -1,0 +1,90 @@
+import pathlib
+import shutil
+import yaml
+
+PROJECT_ROOT = pathlib.Path(__file__).parent.parent
+
+DEFAULTS = {
+    "hotkey": {
+        "keys": ["KEY_RIGHTALT", "KEY_GRAVE"],
+        "mode": "toggle",
+        "max_record_seconds": 30,
+    },
+    "audio": {
+        "device": "default",
+        "channels": 1,
+        "rate": 16000,
+        "format": "S16_LE",
+        "tmp_dir": "/tmp/crowia",
+    },
+    "whisper": {
+        "model": "base",
+        "language": None,
+        "device": "cpu",
+        "compute_type": "int8",
+        "venv": "",
+    },
+    "claude": {
+        "binary": "",
+        "model": "claude-sonnet-4-6",
+        "system_prompt": "Eres un asistente de voz conciso en español. Responde de forma breve y directa.",
+        "timeout_seconds": 60,
+    },
+    "history": {
+        "enabled": True,
+        "path": "/tmp/crowia/history.json",
+        "max_turns": 10,
+    },
+    "output": {
+        "notify_max_chars": 400,
+        "notify_timeout_ms": 8000,
+        "response_file": "/tmp/crowia/last_response.txt",
+        "tts_enabled": False,
+        "tts_command": ["espeak-ng", "-s", "160", "-v", "en"],
+    },
+}
+
+
+def _deep_merge(base: dict, override: dict) -> dict:
+    result = dict(base)
+    for key, val in override.items():
+        if key in result and isinstance(result[key], dict) and isinstance(val, dict):
+            result[key] = _deep_merge(result[key], val)
+        else:
+            result[key] = val
+    return result
+
+
+def load(path: str | None = None) -> dict:
+    if path is None:
+        path = str(PROJECT_ROOT / "config.yaml")
+
+    raw = {}
+    config_path = pathlib.Path(path)
+    if config_path.exists():
+        with open(config_path, encoding="utf-8") as f:
+            raw = yaml.safe_load(f) or {}
+
+    cfg = _deep_merge(DEFAULTS, raw)
+
+    # Resolve venv python path
+    if not cfg["whisper"]["venv"]:
+        venv_python = PROJECT_ROOT / ".venv" / "bin" / "python3"
+        cfg["whisper"]["venv"] = str(venv_python)
+
+    # Resolve claude binary
+    if not cfg["claude"]["binary"]:
+        found = shutil.which("claude")
+        if found:
+            cfg["claude"]["binary"] = found
+        else:
+            cfg["claude"]["binary"] = str(pathlib.Path.home() / ".local" / "bin" / "claude")
+
+    # Validate hotkey mode
+    if cfg["hotkey"]["mode"] not in {"toggle", "push_to_talk"}:
+        raise ValueError(f"hotkey.mode must be 'toggle' or 'push_to_talk', got: {cfg['hotkey']['mode']}")
+
+    # Create tmp_dir
+    pathlib.Path(cfg["audio"]["tmp_dir"]).mkdir(parents=True, exist_ok=True)
+
+    return cfg

@@ -1,0 +1,44 @@
+hotkey:
+  keys: ["KEY_RIGHTCTRL", "KEY_GRAVE"]  # Right-Ctrl + Backtick
+  mode: "toggle"
+  max_record_seconds: 300
+
+audio:
+  device: "default"
+  channels: 1
+  rate: 16000
+  format: "S16_LE"
+  tmp_dir: "/tmp/crowia"
+
+whisper:
+  model: "small"
+  language: "es"
+  device: "cpu"
+  compute_type: "int8"
+  venv: ""
+  initial_prompt: "Pepito, oye pepito, hey pepito, abre Firefox, abre la terminal, busca, qué es, cómo se hace, mira la pantalla, sube el volumen, baja el volumen."
+
+claude:
+  model: "claude-sonnet-4-6"
+  api_key: ""  # solo para screenshots — deja vacío para usar ANTHROPIC_API_KEY del env
+  system_prompt: "Eres un asistente de voz conciso en español llamado Pepito. Responde de forma breve y directa. Usa solo texto plano, sin asteriscos, sin markdown, sin emojis, sin listas con guiones. Cuando analices imágenes de pantalla, describe lo que ves. Tienes acceso real al sistema Linux del usuario mediante herramientas Bash. PUEDES y DEBES abrir aplicaciones usando comandos: usa 'zeditor' para abrir Zed editor, 'alacritty' para abrir terminal, 'firefox' para abrir Firefox. Ejecuta estos comandos en segundo plano con '&' para no bloquear. Cuando el usuario pida abrir una app, ejecútala directamente sin preguntar ni poner excusas."
+  timeout_seconds: 300
+
+always_on:
+  wake_phrases: ["oye pepito", "hey pepito", "pepito"]
+  vad_aggressiveness: 2       # 0-3 (3 = más agresivo, ignora más ruido)
+  silence_duration_ms: 800    # ms de silencio para cortar utterance
+  min_speech_ms: 400          # mínimo de voz para procesar
+  max_record_seconds: 30
+
+history:
+  enabled: true
+  path: "/tmp/crowia/history.json"
+  max_turns: 10
+
+output:
+  notify_max_chars: 400
+  notify_timeout_ms: 8000
+  response_file: "/tmp/crowia/last_response.txt"
+  tts_enabled: true
+  tts_command: ["piper-tts", "--model", "/home/jesusu/.local/share/piper/es_ES-davefx-medium.onnx", "--output_raw"]

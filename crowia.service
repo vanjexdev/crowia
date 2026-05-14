@@ -1,0 +1,19 @@
+[Unit]
+Description=Crowia Voice Assistant
+After=graphical-session.target sound.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/jesusu/Workspace/agents/crowia
+ExecStart=/usr/bin/python3 /home/jesusu/Workspace/agents/crowia/crowia.py
+Restart=on-failure
+RestartSec=5s
+Environment=WAYLAND_DISPLAY=wayland-0
+Environment=DISPLAY=:0
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=graphical-session.target
