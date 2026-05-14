@@ -43,6 +43,11 @@ def main():
                         help="List keyboard input devices and exit")
     parser.add_argument("--always-on", action="store_true",
                         help="Always-on mode: wake word + VAD (no hotkey needed)")
+    parser.add_argument("--backend", choices=["claude", "opencode", "codex"],
+                        help="Override backend from config (claude|opencode|codex)")
+    parser.add_argument("--hotkey",
+                        help="Override hotkey combo, comma-separated evdev names "
+                             "(e.g. KEY_LEFTCTRL,KEY_LEFTSHIFT,KEY_LEFTALT,KEY_1)")
     args = parser.parse_args()
 
     setup_logging(args.debug)
@@ -75,6 +80,11 @@ def main():
 
     cfg = load_config(args.config)
     log = logging.getLogger("crowia")
+
+    if args.backend:
+        cfg["backend"] = args.backend
+    if args.hotkey:
+        cfg["hotkey"]["keys"] = [k.strip() for k in args.hotkey.split(",")]
 
     recorder = Recorder(cfg)
     transcriber = Transcriber(cfg)
