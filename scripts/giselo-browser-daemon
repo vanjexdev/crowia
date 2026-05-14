@@ -44,9 +44,15 @@ def current_page() -> Page | None:
 
 
 async def ensure_page() -> Page:
+    global pages, current_idx
+    # Remove any closed pages
+    pages = [p for p in pages if not p.is_closed()]
+    if current_idx >= len(pages):
+        current_idx = max(0, len(pages) - 1)
     if not pages:
         p = await context.new_page()
         pages.append(p)
+        current_idx = 0
     return pages[current_idx]
 
 
@@ -239,9 +245,12 @@ async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWrit
     except Exception as e:
         result = {"ok": False, "error": str(e)}
     finally:
-        writer.write(json.dumps(result).encode() + b"\n")
-        await writer.drain()
-        writer.close()
+        try:
+            writer.write(json.dumps(result).encode() + b"\n")
+            await writer.drain()
+            writer.close()
+        except (ConnectionResetError, BrokenPipeError):
+            pass
 
 
 async def main():

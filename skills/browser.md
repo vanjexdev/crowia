@@ -22,10 +22,11 @@ giselo-browser status               # Ver si el navegador está activo
 ### Abrir YouTube Music y buscar
 ```
 giselo-browser navigate https://music.youtube.com
-giselo-browser click Buscar
+giselo-browser eval "document.querySelector('input[placeholder]')?.click()"
 giselo-browser type música años 80
 giselo-browser key Enter
 ```
+Nota: YouTube Music no tiene texto visible en el buscador — usa eval para activar el input.
 
 ### Buscar en Google
 ```
