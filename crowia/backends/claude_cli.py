@@ -17,7 +17,7 @@ class ClaudeCliBackend(Backend):
         self._binary = cfg["claude"]["binary"] or shutil.which("claude") or ""
         self._model = cfg["claude"].get("model", "claude-haiku-4-5")
         tools = cfg["claude"].get("allowed_tools",
-            "WebSearch Bash(git *) Bash(zeditor*) Bash(alacritty*) Bash(firefox*) Bash(giselo-ask*) Bash(giselo-askpass*) Bash(giselo-pick*) Bash(giselo-browser*) Read Edit Write")
+            "WebSearch Bash(git *) Bash(zeditor*) Bash(alacritty*) Bash(firefox*) Bash(giselo-ask*) Bash(giselo-askpass*) Bash(giselo-pick*) Bash(giselo-browser*) Bash(giselo-google*) Read Edit Write")
         self._allowed_tools = tools
         self._disallowed_tools = cfg["claude"].get("disallowed_tools", "Bash(git push*)")
         self._proc: subprocess.Popen | None = None
@@ -72,13 +72,17 @@ class ClaudeCliBackend(Backend):
         env.setdefault("DBUS_SESSION_BUS_ADDRESS", f"unix:path=/run/user/{uid}/bus")
         env["SUDO_ASKPASS"] = str(pathlib.Path.home() / ".local/bin/giselo-askpass")
 
+        log.debug("Launching claude CLI (prompt_len=%d, sysprompt_len=%d)",
+                  len(full_text), len(system_prompt))
         try:
             with self._lock:
                 self._proc = subprocess.Popen(
                     cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                     text=True, env=env,
                 )
+            log.debug("Claude CLI started (pid=%d), waiting...", self._proc.pid)
             stdout, stderr = self._proc.communicate(timeout=timeout)
+            log.debug("Claude CLI finished (rc=%d, stdout_len=%d)", self._proc.returncode, len(stdout))
             rc = self._proc.returncode
         except subprocess.TimeoutExpired:
             self.cancel()

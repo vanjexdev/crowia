@@ -1,0 +1,281 @@
+#!/home/jesusu/Workspace/agents/crowia/.venv/bin/python3
+"""
+giselo-google <servicio> <acción> [args]
+
+Gmail:
+  giselo-google gmail list [--limit N]        Últimos N emails (default 10)
+  giselo-google gmail unread [--limit N]      Emails sin leer
+  giselo-google gmail read <id>               Leer email por ID
+  giselo-google gmail send <to> <subject> <body>  Enviar email
+  giselo-google gmail search <query>          Buscar emails
+
+Calendar:
+  giselo-google calendar list [--days N]      Próximos N días (default 7)
+  giselo-google calendar today                Eventos de hoy
+  giselo-google calendar week                 Eventos de esta semana
+  giselo-google calendar add <titulo> <cuando> [--duration MIN]  Crear evento
+
+Auth:
+  giselo-google auth                          OAuth inicial (abre browser)
+"""
+import base64
+import datetime
+import email as email_lib
+import os
+import pathlib
+import sys
+
+os.environ.setdefault("WAYLAND_DISPLAY", "wayland-0")
+os.environ.setdefault("DISPLAY", ":0")
+uid = os.getuid()
+os.environ.setdefault("XDG_RUNTIME_DIR", f"/run/user/{uid}")
+os.environ.setdefault("DBUS_SESSION_BUS_ADDRESS", f"unix:path=/run/user/{uid}/bus")
+
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
+from googleapiclient.discovery import build
+
+CREDS_FILE  = pathlib.Path.home() / ".config/crowia/google_credentials.json"
+TOKEN_FILE  = pathlib.Path.home() / ".config/crowia/google_token.json"
+
+SCOPES = [
+    "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/gmail.send",
+    "https://www.googleapis.com/auth/gmail.modify",
+    "https://www.googleapis.com/auth/calendar.readonly",
+    "https://www.googleapis.com/auth/calendar.events",
+]
+
+
+def get_credentials() -> Credentials:
+    creds = None
+    if TOKEN_FILE.exists():
+        creds = Credentials.from_authorized_user_file(str(TOKEN_FILE), SCOPES)
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        else:
+            if not CREDS_FILE.exists():
+                print(f"Error: {CREDS_FILE} no encontrado.", file=sys.stderr)
+                sys.exit(1)
+            flow = InstalledAppFlow.from_client_secrets_file(str(CREDS_FILE), SCOPES)
+            creds = flow.run_local_server(port=0, open_browser=True)
+        TOKEN_FILE.write_text(creds.to_json())
+    return creds
+
+
+# ── Gmail ─────────────────────────────────────────────────────────────────────
+
+def gmail_list(limit=10, query=""):
+    svc = build("gmail", "v1", credentials=get_credentials())
+    q = query or "in:inbox"
+    res = svc.users().messages().list(userId="me", q=q, maxResults=limit).execute()
+    msgs = res.get("messages", [])
+    if not msgs:
+        print("Sin mensajes.")
+        return
+    for m in msgs:
+        detail = svc.users().messages().get(
+            userId="me", id=m["id"], format="metadata",
+            metadataHeaders=["From", "Subject", "Date"]
+        ).execute()
+        headers = {h["name"]: h["value"] for h in detail["payload"]["headers"]}
+        labels = detail.get("labelIds", [])
+        unread = "UNREAD" in labels
+        marker = "●" if unread else " "
+        print(f"{marker} [{m['id'][:12]}] {headers.get('Date','')[:16]} | {headers.get('From','')[:30]} | {headers.get('Subject','')[:50]}")
+
+
+def gmail_read(msg_id: str):
+    svc = build("gmail", "v1", credentials=get_credentials())
+    detail = svc.users().messages().get(userId="me", id=msg_id, format="full").execute()
+    headers = {h["name"]: h["value"] for h in detail["payload"]["headers"]}
+    print(f"De:      {headers.get('From','')}")
+    print(f"Para:    {headers.get('To','')}")
+    print(f"Fecha:   {headers.get('Date','')}")
+    print(f"Asunto:  {headers.get('Subject','')}")
+    print("---")
+
+    def extract_text(payload):
+        mime = payload.get("mimeType", "")
+        if mime == "text/plain" and "data" in payload.get("body", {}):
+            return base64.urlsafe_b64decode(payload["body"]["data"]).decode("utf-8", errors="replace")
+        for part in payload.get("parts", []):
+            result = extract_text(part)
+            if result:
+                return result
+        return ""
+
+    body = extract_text(detail["payload"])
+    print(body[:3000] + ("..." if len(body) > 3000 else ""))
+
+    # Mark as read
+    svc.users().messages().modify(
+        userId="me", id=msg_id, body={"removeLabelIds": ["UNREAD"]}
+    ).execute()
+
+
+def gmail_send(to: str, subject: str, body: str):
+    svc = build("gmail", "v1", credentials=get_credentials())
+    msg = email_lib.message.EmailMessage()
+    msg["To"] = to
+    msg["Subject"] = subject
+    msg.set_content(body)
+    raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
+    svc.users().messages().send(userId="me", body={"raw": raw}).execute()
+    print(f"Email enviado a {to}.")
+
+
+def gmail_search(query: str, limit=10):
+    gmail_list(limit=limit, query=query)
+
+
+# ── Calendar ──────────────────────────────────────────────────────────────────
+
+def _fmt_event(e: dict) -> str:
+    start = e.get("start", {})
+    dt = start.get("dateTime", start.get("date", ""))[:16]
+    summary = e.get("summary", "(sin título)")
+    location = e.get("location", "")
+    loc = f" @ {location}" if location else ""
+    return f"[{dt}] {summary}{loc}"
+
+
+def calendar_list(days=7):
+    svc = build("calendar", "v3", credentials=get_credentials())
+    now = datetime.datetime.utcnow()
+    end = now + datetime.timedelta(days=days)
+    res = svc.events().list(
+        calendarId="primary",
+        timeMin=now.isoformat() + "Z",
+        timeMax=end.isoformat() + "Z",
+        maxResults=20,
+        singleEvents=True,
+        orderBy="startTime",
+    ).execute()
+    events = res.get("items", [])
+    if not events:
+        print(f"Sin eventos en los próximos {days} días.")
+        return
+    for e in events:
+        print(_fmt_event(e))
+
+
+def calendar_today():
+    svc = build("calendar", "v3", credentials=get_credentials())
+    today = datetime.datetime.now().date()
+    start = datetime.datetime.combine(today, datetime.time.min).isoformat() + "Z"
+    end   = datetime.datetime.combine(today, datetime.time.max).isoformat() + "Z"
+    res = svc.events().list(
+        calendarId="primary", timeMin=start, timeMax=end,
+        singleEvents=True, orderBy="startTime",
+    ).execute()
+    events = res.get("items", [])
+    if not events:
+        print("Sin eventos hoy.")
+        return
+    for e in events:
+        print(_fmt_event(e))
+
+
+def calendar_week():
+    calendar_list(days=7)
+
+
+def calendar_add(title: str, when: str, duration_min: int = 60):
+    svc = build("calendar", "v3", credentials=get_credentials())
+    from dateutil import parser as dtparser
+    try:
+        start_dt = dtparser.parse(when, dayfirst=False)
+    except Exception:
+        print(f"Error: no entiendo la fecha '{when}'. Usa formato como '2026-05-15 14:00'.")
+        sys.exit(1)
+    end_dt = start_dt + datetime.timedelta(minutes=duration_min)
+    tz = datetime.datetime.now(datetime.timezone.utc).astimezone().tzname()
+    event = {
+        "summary": title,
+        "start": {"dateTime": start_dt.isoformat(), "timeZone": str(datetime.datetime.now().astimezone().tzinfo)},
+        "end":   {"dateTime": end_dt.isoformat(),   "timeZone": str(datetime.datetime.now().astimezone().tzinfo)},
+    }
+    created = svc.events().insert(calendarId="primary", body=event).execute()
+    print(f"Evento creado: {created.get('summary')} el {start_dt.strftime('%Y-%m-%d %H:%M')}")
+
+
+# ── CLI dispatch ──────────────────────────────────────────────────────────────
+
+def main():
+    args = sys.argv[1:]
+    if not args or args[0] in ("-h", "--help"):
+        print(__doc__)
+        sys.exit(0)
+
+    service = args[0].lower()
+    action  = args[1].lower() if len(args) > 1 else ""
+    rest    = args[2:]
+
+    if service == "auth":
+        get_credentials()
+        print("Autenticación completada.")
+        return
+
+    # ── gmail ──
+    if service == "gmail":
+        limit = 10
+        if "--limit" in rest:
+            i = rest.index("--limit")
+            limit = int(rest[i + 1])
+            rest = rest[:i] + rest[i + 2:]
+
+        if action == "list":
+            gmail_list(limit=limit)
+        elif action == "unread":
+            gmail_list(limit=limit, query="is:unread in:inbox")
+        elif action == "read":
+            if not rest:
+                print("Uso: giselo-google gmail read <id>", file=sys.stderr); sys.exit(1)
+            gmail_read(rest[0])
+        elif action == "send":
+            if len(rest) < 3:
+                print("Uso: giselo-google gmail send <to> <subject> <body>", file=sys.stderr); sys.exit(1)
+            gmail_send(rest[0], rest[1], " ".join(rest[2:]))
+        elif action == "search":
+            gmail_search(" ".join(rest), limit=limit)
+        else:
+            print(f"Acción gmail desconocida: '{action}'"); sys.exit(1)
+        return
+
+    # ── calendar ──
+    if service == "calendar":
+        days = 7
+        if "--days" in rest:
+            i = rest.index("--days")
+            days = int(rest[i + 1])
+            rest = rest[:i] + rest[i + 2:]
+
+        duration = 60
+        if "--duration" in rest:
+            i = rest.index("--duration")
+            duration = int(rest[i + 1])
+            rest = rest[:i] + rest[i + 2:]
+
+        if action == "list":
+            calendar_list(days=days)
+        elif action == "today":
+            calendar_today()
+        elif action == "week":
+            calendar_week()
+        elif action == "add":
+            if len(rest) < 2:
+                print("Uso: giselo-google calendar add <titulo> <cuando>", file=sys.stderr); sys.exit(1)
+            calendar_add(rest[0], " ".join(rest[1:]), duration_min=duration)
+        else:
+            print(f"Acción calendar desconocida: '{action}'"); sys.exit(1)
+        return
+
+    print(f"Servicio desconocido: '{service}'. Usa 'gmail' o 'calendar'.")
+    sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
