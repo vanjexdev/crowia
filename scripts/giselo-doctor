@@ -175,7 +175,7 @@ def check_tts(os_info: dict) -> list[str]:
         return ["espeak-ng", "-s", "160", "-v", "es"]
 
     # Linux
-    piper = shutil.which("piper") or shutil.which("piper-tts")
+    piper = shutil.which("piper-tts") or shutil.which("piper")
     if piper:
         _check("piper-tts (TTS)", True, detail=piper)
         return [piper, "--model", "~/.local/share/piper/es_ES-davefx-medium.onnx", "--output_raw"]
