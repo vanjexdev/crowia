@@ -77,13 +77,33 @@ Di "oye giselo", "hey giselo" o "giselo" para activar. El siguiente utterance va
 
 ## Instalación
 
-```bash
-# Dependencias del sistema
-sudo pacman -S python-evdev python-yaml alsa-utils libnotify espeak-ng spectacle piper-tts-bin
+### Pasos comunes (todos los OS)
 
-# Venv y faster-whisper
+```bash
+# 1. Clonar repo
+git clone <repo-url> crowia && cd crowia
+
+# 2. Venv y dependencias Python
 python3 -m venv --system-site-packages .venv
 .venv/bin/pip install faster-whisper anthropic sounddevice webrtcvad-wheels numpy
+
+# 3. Claude CLI
+npm install -g @anthropic-ai/claude-code
+
+# 4. Correr doctor (detecta OS y genera config.local.yaml)
+./scripts/giselo-doctor
+
+# 5. Arrancar
+.venv/bin/python3 crowia.py
+```
+
+---
+
+### Arch / CachyOS / Manjaro
+
+```bash
+# Dependencias del sistema
+paru -S python-evdev python-yaml alsa-utils libnotify spectacle piper-tts playerctl kdialog
 
 # Modelo de voz español
 mkdir -p ~/.local/share/piper
@@ -92,9 +112,107 @@ curl -L -o ~/.local/share/piper/es_ES-davefx-medium.onnx \
 curl -L -o ~/.local/share/piper/es_ES-davefx-medium.onnx.json \
   "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/es/es_ES/davefx/medium/es_ES-davefx-medium.onnx.json"
 
-# Agregar usuario al grupo input (requiere re-login)
+# Acceso a dispositivos de teclado (requiere re-login)
 sudo usermod -aG input $USER
 ```
+
+---
+
+### Ubuntu / Debian
+
+```bash
+# Dependencias del sistema
+sudo apt install -y python3-evdev python3-yaml alsa-utils libnotify-bin \
+                   espeak-ng playerctl zenity python3-venv python3-pip
+
+# piper-tts (no está en apt — instalar binario)
+pip install piper-tts
+# O descargar binario desde https://github.com/rhasspy/piper/releases
+
+# Modelo de voz español
+mkdir -p ~/.local/share/piper
+curl -L -o ~/.local/share/piper/es_ES-davefx-medium.onnx \
+  "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/es/es_ES/davefx/medium/es_ES-davefx-medium.onnx"
+curl -L -o ~/.local/share/piper/es_ES-davefx-medium.onnx.json \
+  "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/es/es_ES/davefx/medium/es_ES-davefx-medium.onnx.json"
+
+# Venv (Ubuntu no usa --system-site-packages por defecto)
+python3 -m venv .venv
+.venv/bin/pip install faster-whisper anthropic sounddevice webrtcvad-wheels numpy PyQt6 pyyaml
+
+# Acceso a dispositivos de teclado (requiere re-login)
+sudo usermod -aG input $USER
+```
+
+> **Nota:** En Ubuntu/GNOME usar `zenity` como file picker. `giselo-doctor` lo detecta automáticamente.
+
+---
+
+### Fedora
+
+```bash
+# Dependencias del sistema
+sudo dnf install -y python3-evdev python3-pyyaml alsa-utils libnotify \
+                   espeak-ng playerctl zenity python3-pip
+
+# piper-tts (no está en dnf — instalar con pip)
+pip install piper-tts
+
+# Modelo de voz español
+mkdir -p ~/.local/share/piper
+curl -L -o ~/.local/share/piper/es_ES-davefx-medium.onnx \
+  "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/es/es_ES/davefx/medium/es_ES-davefx-medium.onnx"
+curl -L -o ~/.local/share/piper/es_ES-davefx-medium.onnx.json \
+  "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/es/es_ES/davefx/medium/es_ES-davefx-medium.onnx.json"
+
+.venv/bin/pip install faster-whisper anthropic sounddevice webrtcvad-wheels numpy PyQt6 pyyaml
+
+# Acceso a dispositivos de teclado (requiere re-login)
+sudo usermod -aG input $USER
+```
+
+---
+
+### macOS
+
+> Requiere macOS 12+ y Homebrew.
+
+```bash
+# Dependencias
+brew install python@3.12 node
+
+# TTS nativo (say) — no requiere instalación
+# File picker nativo (osascript) — no requiere instalación
+# Hotkey vía pynput (no evdev en macOS)
+
+.venv/bin/pip install faster-whisper anthropic sounddevice webrtcvad-wheels numpy PyQt6 pyyaml pynput
+
+# Claude CLI
+npm install -g @anthropic-ai/claude-code
+```
+
+> **Nota:** En macOS el hotkey usa `pynput` (accesibilidad del sistema). Habilitar en: Preferencias del Sistema → Privacidad → Accesibilidad → agregar Terminal/iTerm.
+
+---
+
+### Windows
+
+> Soporte experimental. Requiere Python 3.10+, Node.js y Git Bash.
+
+```powershell
+# Instalar Python desde python.org
+# Instalar Node.js desde nodejs.org
+
+pip install faster-whisper anthropic sounddevice PyQt6 pyyaml pynput
+
+# Claude CLI
+npm install -g @anthropic-ai/claude-code
+
+# espeak-ng para TTS
+winget install espeak-ng
+```
+
+> **Limitaciones en Windows:** evdev no disponible (hotkey usa pynput), playerctl no disponible (sin control de media), kdialog/zenity no disponibles (file picker limitado).
 
 ## giselo-doctor
 
