@@ -102,6 +102,7 @@ def main():
         overlay._on_cancel = on_cancel
         overlay.set_backend(assistant.current_backend_name)
         overlay.tts_toggled.connect(output.set_tts)
+        output.set_tts(overlay._tts_enabled)  # sync prefs → output on startup
 
     history_cfg = cfg.get("history", {})
     history = ConversationHistory(
@@ -185,12 +186,18 @@ def main():
             file_paths.extend(extra_files)
 
         output.show_status(f"Preguntando a {assistant.current_backend_name}: {text[:50]}…")
+
+        def _on_chunk(partial: str):
+            if overlay:
+                overlay.set_response(partial)
+
         try:
             response = assistant.ask(
                 text=text,
                 history=history.get_messages(),
                 image_path=screenshot_path,
                 file_paths=file_paths or None,
+                on_chunk=_on_chunk if overlay else None,
             )
         except Exception as e:
             log.error("Assistant error: %s", e)
@@ -213,10 +220,10 @@ def main():
 
     def _on_text_submitted(text: str, file_strs: list):
         files = [pathlib.Path(p) for p in file_strs]
-        threading.Thread(
-            target=lambda: (pipeline_lock.acquire(), _run_text_pipeline(text, files), pipeline_lock.release()),
-            daemon=True,
-        ).start()
+        def _wrapper():
+            with pipeline_lock:
+                _run_text_pipeline(text, files)
+        threading.Thread(target=_wrapper, daemon=True).start()
 
     if overlay:
         overlay.text_submitted.connect(_on_text_submitted)

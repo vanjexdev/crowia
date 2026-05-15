@@ -8,7 +8,7 @@ from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QObject
 from PyQt6.QtGui import QPixmap, QPainter, QColor, QFont
 from PyQt6.QtWidgets import (
     QApplication, QCheckBox, QDialog, QDialogButtonBox,
-    QHBoxLayout, QLabel, QPlainTextEdit, QPushButton,
+    QHBoxLayout, QLabel, QMenu, QPlainTextEdit, QPushButton,
     QTextBrowser, QVBoxLayout, QWidget,
 )
 
@@ -171,12 +171,17 @@ class TextInputPanel(QWidget):
         self._edit.setFocus()
 
     def _pick_files(self):
+        menu = QMenu(self)
+        menu.addAction("📄 Archivo", lambda: self._launch_picker(folder=False))
+        menu.addAction("📁 Carpeta", lambda: self._launch_picker(folder=True))
+        menu.exec(self._edit.mapToGlobal(self._edit.rect().bottomLeft()))
+
+    def _launch_picker(self, folder: bool):
         def _run():
             picker = shutil.which("giselo-pick") or str(_SCRIPTS_DIR / "giselo-pick")
+            cmd = [picker, "--dir"] if folder else [picker]
             try:
-                result = subprocess.run(
-                    [picker], capture_output=True, text=True, timeout=60
-                )
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
                 if result.returncode == 0 and result.stdout.strip():
                     self._file_ready.emit(result.stdout.strip())
             except Exception:

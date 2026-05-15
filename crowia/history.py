@@ -1,6 +1,7 @@
 import json
 import logging
 import pathlib
+import threading
 
 log = logging.getLogger(__name__)
 
@@ -10,6 +11,7 @@ class ConversationHistory:
         self.path = path
         self.max_turns = max_turns
         self._messages: list[dict] = []
+        self._lock = threading.Lock()
         self._load()
 
     def _load(self):
@@ -29,16 +31,19 @@ class ConversationHistory:
         )
 
     def add(self, role: str, content):
-        self._messages.append({"role": role, "content": content})
-        limit = self.max_turns * 2
-        if len(self._messages) > limit:
-            self._messages = self._messages[-limit:]
-        self._save()
+        with self._lock:
+            self._messages.append({"role": role, "content": content})
+            limit = self.max_turns * 2
+            if len(self._messages) > limit:
+                self._messages = self._messages[-limit:]
+            self._save()
 
     def get_messages(self) -> list[dict]:
-        return list(self._messages)
+        with self._lock:
+            return list(self._messages)
 
     def clear(self):
-        self._messages = []
-        self._save()
+        with self._lock:
+            self._messages = []
+            self._save()
         log.info("History cleared")
