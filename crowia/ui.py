@@ -422,7 +422,7 @@ class CrowiaOverlay(QWidget):
 
         self._response_box = QTextBrowser()
         self._response_box.setFont(QFont("Sans", 10))
-        self._response_box.setMinimumWidth(280)
+        self._response_box.setMinimumWidth(500)
         self._response_box.setMinimumHeight(80)
         self._response_box.setOpenExternalLinks(False)
         self._response_box.setStyleSheet(
@@ -462,7 +462,6 @@ class CrowiaOverlay(QWidget):
         self.setCursor(Qt.CursorShape.SizeAllCursor)
         self._set_image("idle")
         self._move_bottom_right()
-        QTimer.singleShot(0, self._restore_splitter_sizes)
 
     # ── public thread-safe API ────────────────────────────────────────────────
 
@@ -617,6 +616,10 @@ class CrowiaOverlay(QWidget):
         self.move(screen.width() - self.width() - 24, screen.height() - self.height() - 48)
 
     # ── mouse / keyboard ──────────────────────────────────────────────────────
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        QTimer.singleShot(50, self._restore_splitter_sizes)
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key.Key_Escape:
