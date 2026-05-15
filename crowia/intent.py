@@ -50,25 +50,29 @@ _CLEAR_HISTORY_KW = [
 ]
 
 _MEDIA_PAUSE_KW = [
-    "pausa", "pausar", "pausa la música", "pausa el video", "pausa la canción",
-    "para la música", "para la canción", "detén la música", "detener música",
-    "para la música", "stop music", "pause",
+    "pausa la música", "pausa el video", "pausa la canción", "pausa el audio",
+    "pausar la música", "pausar el video",
+    "para la música", "para la canción", "para el audio",
+    "detén la música", "detener música", "detener el audio",
+    "stop music",
 ]
 
 _MEDIA_PLAY_KW = [
-    "reanuda", "continúa", "continua", "reproduce", "play",
-    "reanuda la música", "continúa la música", "pon la música",
+    "reanuda la música", "reanuda el audio", "reanuda el video",
+    "continúa la música", "continua la música",
+    "reproduce la música", "pon la música", "pon música",
     "sigue la música", "sigue reproduciendo",
 ]
 
 _MEDIA_NEXT_KW = [
-    "siguiente", "siguiente canción", "siguiente pista", "skip",
-    "salta la canción", "próxima canción", "proxima cancion", "next",
+    "siguiente canción", "siguiente pista", "siguiente track",
+    "salta la canción", "próxima canción", "proxima cancion",
+    "pon la siguiente", "cambia la canción",
 ]
 
 _MEDIA_PREV_KW = [
-    "anterior", "canción anterior", "pista anterior", "regresa", "atrás",
-    "vuelve a la anterior", "previous", "prev",
+    "canción anterior", "pista anterior", "track anterior",
+    "vuelve a la anterior", "regresa la canción", "cancion anterior",
 ]
 
 _TTS_MUTE_KW = [
