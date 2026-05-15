@@ -73,7 +73,6 @@ class ClaudeCliBackend(Backend):
             "--system-prompt", system_prompt,
             "--no-session-persistence",
             "--dangerously-skip-permissions",
-            "--add-dir", "/home/jesusu",
             "--add-dir", str(pathlib.Path.home()),
             "--allowedTools", self._allowed_tools,
             "--disallowedTools", self._disallowed_tools,

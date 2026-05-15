@@ -1,10 +1,13 @@
+import logging
 import math
 import pathlib
 import shutil
 import subprocess
 import threading
 
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QObject
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QObject, QMetaObject
+
+log = logging.getLogger(__name__)
 from PyQt6.QtGui import QPixmap, QPainter, QColor, QFont
 from PyQt6.QtWidgets import (
     QApplication, QCheckBox, QDialog, QDialogButtonBox,
@@ -134,6 +137,7 @@ class TextInputPanel(QWidget):
     def __init__(self, resp_width: int, parent=None):
         super().__init__(parent)
         self._files: list[pathlib.Path] = []
+        self._pending_file_path: str | None = None
         self._file_ready.connect(lambda p: self._add_chip(pathlib.Path(p)))
 
         layout = QVBoxLayout(self)
@@ -183,10 +187,19 @@ class TextInputPanel(QWidget):
             try:
                 result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
                 if result.returncode == 0 and result.stdout.strip():
-                    self._file_ready.emit(result.stdout.strip())
-            except Exception:
-                pass
+                    self._pending_file_path = result.stdout.strip()
+                    QMetaObject.invokeMethod(
+                        self, "_emit_pending_file", Qt.ConnectionType.QueuedConnection
+                    )
+            except Exception as e:
+                log.error("File picker failed: %s", e)
         threading.Thread(target=_run, daemon=True).start()
+
+    def _emit_pending_file(self):
+        """Slot to safely emit signal from another thread."""
+        if self._pending_file_path:
+            self._file_ready.emit(self._pending_file_path)
+            self._pending_file_path = None
 
     def _add_chip(self, path: pathlib.Path):
         if path in self._files:

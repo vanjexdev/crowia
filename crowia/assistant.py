@@ -105,6 +105,7 @@ class Assistant:
         history: list[dict] | None = None,
         image_path: pathlib.Path | None = None,
         file_paths: list[pathlib.Path] | None = None,
+        on_chunk=None,
     ) -> str:
         if image_path and image_path.exists():
             return self._ask_vision_api(text, history, image_path, file_paths)
@@ -114,6 +115,7 @@ class Assistant:
             history=history,
             file_paths=file_paths,
             timeout=self.timeout,
+            on_chunk=on_chunk,
         )
 
     def _client(self) -> anthropic.Anthropic:

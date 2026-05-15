@@ -25,7 +25,7 @@ class CodexBackend(Backend):
             if self._proc and self._proc.poll() is None:
                 self._proc.kill()
 
-    def ask(self, text, system_prompt, history=None, image_path=None, file_paths=None, timeout=120):
+    def ask(self, text, system_prompt, history=None, image_path=None, file_paths=None, timeout=120, on_chunk=None):
         full_text = f"[INSTRUCCIONES DEL SISTEMA]\n{system_prompt}\n[FIN INSTRUCCIONES]\n\n" if system_prompt else ""
         if history:
             lines = []
@@ -65,11 +65,14 @@ class CodexBackend(Backend):
                 response = out_file.read_text(encoding="utf-8").strip()
                 out_file.unlink(missing_ok=True)
                 log.info("Codex response (%d chars): %s", len(response), response[:200])
+                if on_chunk: on_chunk(response)
                 return response
             if rc != 0:
                 log.error("Codex error (rc=%d): %s", rc, stderr[:300])
                 return f"[crowia] Error de Codex (rc={rc})"
-            return stdout.strip()
+            response = stdout.strip()
+            if on_chunk: on_chunk(response)
+            return response
         except subprocess.TimeoutExpired:
             self.cancel()
             return f"[crowia] Codex tardó demasiado ({timeout}s)."
