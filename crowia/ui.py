@@ -176,30 +176,33 @@ class TextInputPanel(QWidget):
         self._edit.setStyleSheet(_INPUT_STYLE)
         layout.addWidget(self._edit)
 
-        bottom = QHBoxLayout()
-        bottom.setContentsMargins(0, 0, 0, 0)
-        bottom.setSpacing(4)
+        # Chips row — separate from action buttons so they never get squeezed
+        self._chips_row = QHBoxLayout()
+        self._chips_row.setContentsMargins(0, 0, 0, 0)
+        self._chips_row.setSpacing(3)
+        self._chips_row.addStretch()
+        layout.addLayout(self._chips_row)
 
-        self._chips = QHBoxLayout()
-        self._chips.setContentsMargins(0, 0, 0, 0)
-        self._chips.setSpacing(3)
-        bottom.addLayout(self._chips)
-        bottom.addStretch()
+        # Action buttons row
+        btns = QHBoxLayout()
+        btns.setContentsMargins(0, 0, 0, 0)
+        btns.setSpacing(4)
+        btns.addStretch()
 
         self.send_btn = QPushButton("Enviar ↩")
         self.send_btn.setStyleSheet(_ACTION_STYLE)
         self.send_btn.clicked.connect(self._submit)
-        bottom.addWidget(self.send_btn)
+        btns.addWidget(self.send_btn)
 
         self.memory_btn = QPushButton("💾 Memoria")
         self.memory_btn.setStyleSheet(_MEM_STYLE)
-        bottom.addWidget(self.memory_btn)
+        btns.addWidget(self.memory_btn)
 
         self.export_btn = QPushButton("📋 Exportar")
         self.export_btn.setStyleSheet(_EXPORT_STYLE)
-        bottom.addWidget(self.export_btn)
+        btns.addWidget(self.export_btn)
 
-        layout.addLayout(bottom)
+        layout.addLayout(btns)
 
         self._edit.at_triggered.connect(self._pick_files)
         self._edit.submit_triggered.connect(self._submit)
@@ -240,7 +243,8 @@ class TextInputPanel(QWidget):
         btn = QPushButton(f"📎 {path.name} ✕")
         btn.setStyleSheet(_CHIP_STYLE)
         btn.clicked.connect(lambda checked=False, p=path, b=btn: self._remove_chip(p, b))
-        self._chips.addWidget(btn)
+        # Insert before the trailing stretch (last item)
+        self._chips_row.insertWidget(self._chips_row.count() - 1, btn)
 
     def _remove_chip(self, path: pathlib.Path, btn: QPushButton):
         if path in self._files:
@@ -255,8 +259,8 @@ class TextInputPanel(QWidget):
         self.submitted.emit(text, files)
         self._edit.clear()
         self._files.clear()
-        for i in reversed(range(self._chips.count())):
-            w = self._chips.itemAt(i).widget()
+        for i in reversed(range(self._chips_row.count())):
+            w = self._chips_row.itemAt(i).widget()
             if w:
                 w.deleteLater()
 
