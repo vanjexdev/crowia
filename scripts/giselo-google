@@ -6,7 +6,7 @@ Gmail:
   giselo-google gmail list [--limit N]        Últimos N emails (default 10)
   giselo-google gmail unread [--limit N]      Emails sin leer
   giselo-google gmail read <id>               Leer email por ID
-  giselo-google gmail send <to> <subject> <body>  Enviar email
+  giselo-google gmail send <to> <subject> <body> [--draft]  Enviar email (o guardar como borrador)
   giselo-google gmail search <query>          Buscar emails
 
 Calendar:
@@ -116,15 +116,19 @@ def gmail_read(msg_id: str):
     ).execute()
 
 
-def gmail_send(to: str, subject: str, body: str):
+def gmail_send(to: str, subject: str, body: str, draft: bool = False):
     svc = build("gmail", "v1", credentials=get_credentials())
     msg = email_lib.message.EmailMessage()
     msg["To"] = to
     msg["Subject"] = subject
     msg.set_content(body)
     raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
-    svc.users().messages().send(userId="me", body={"raw": raw}).execute()
-    print(f"Email enviado a {to}.")
+    if draft:
+        svc.users().drafts().create(userId="me", body={"message": {"raw": raw}}).execute()
+        print(f"Borrador guardado para {to}.")
+    else:
+        svc.users().messages().send(userId="me", body={"raw": raw}).execute()
+        print(f"Email enviado a {to}.")
 
 
 def gmail_search(query: str, limit=10):
@@ -286,8 +290,13 @@ def main():
             gmail_read(rest[0])
         elif action == "send":
             if len(rest) < 3:
-                print("Uso: giselo-google gmail send <to> <subject> <body>", file=sys.stderr); sys.exit(1)
-            gmail_send(rest[0], rest[1], " ".join(rest[2:]))
+                print("Uso: giselo-google gmail send <to> <subject> <body> [--draft]", file=sys.stderr); sys.exit(1)
+            draft = "--draft" in rest
+            if draft:
+                rest.remove("--draft")
+            if len(rest) < 3:
+                print("Uso: giselo-google gmail send <to> <subject> <body> [--draft]", file=sys.stderr); sys.exit(1)
+            gmail_send(rest[0], rest[1], " ".join(rest[2:]), draft=draft)
         elif action == "search":
             gmail_search(" ".join(rest), limit=limit)
         else:

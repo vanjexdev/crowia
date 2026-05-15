@@ -71,6 +71,19 @@ _MEDIA_PREV_KW = [
     "vuelve a la anterior", "previous", "prev",
 ]
 
+_SKILL_DISABLE_RE = re.compile(
+    r'(?:desactiva|deshabilita|apaga|quita|desactiva)\s+(?:la\s+)?skill\s+([\w-]+)',
+    re.IGNORECASE,
+)
+_SKILL_ENABLE_RE = re.compile(
+    r'(?:activa|habilita|enciende|agrega|añade)\s+(?:la\s+)?skill\s+([\w-]+)',
+    re.IGNORECASE,
+)
+_SKILL_LIST_KW = [
+    "qué skills", "que skills", "lista de skills", "skills activas",
+    "skills disponibles", "cuáles skills", "cuales skills",
+]
+
 _VOLUME_PCT = re.compile(r'volumen\s+al\s+(\d{1,3})\s*%?', re.IGNORECASE)
 _FILE_PATH = re.compile(r'(?:~/|/)[^\s,;:]+\.\w+')
 
@@ -83,6 +96,9 @@ class Intents:
         self.media: str | None = None  # "pause" | "play" | "next" | "prev"
         self.clear_history: bool = False
         self.switch_backend: str | None = None  # "claude" | "codex" | "opencode"
+        self.skill_enable: str | None = None
+        self.skill_disable: str | None = None
+        self.skill_list: bool = False
 
 
 def detect(text: str) -> Intents:
@@ -122,6 +138,17 @@ def detect(text: str) -> Intents:
         result.media = "next"
     elif any(kw in low for kw in _MEDIA_PREV_KW):
         result.media = "prev"
+
+    m = _SKILL_DISABLE_RE.search(low)
+    if m:
+        result.skill_disable = m.group(1)
+    else:
+        m = _SKILL_ENABLE_RE.search(low)
+        if m:
+            result.skill_enable = m.group(1)
+
+    if any(kw in low for kw in _SKILL_LIST_KW):
+        result.skill_list = True
 
     for raw in _FILE_PATH.findall(text):
         p = pathlib.Path(raw.replace("~", str(pathlib.Path.home())))

@@ -22,6 +22,7 @@ Acciones:
   wait <ms>                     Esperar ms milisegundos
   eval <código_js>              Ejecutar JavaScript en la página
 """
+
 import json
 import os
 import pathlib
@@ -31,19 +32,33 @@ import sys
 import time
 
 SOCKET_PATH = pathlib.Path("/tmp/crowia/browser.sock")
-PID_FILE    = pathlib.Path("/tmp/crowia/browser.pid")
-DAEMON      = pathlib.Path(__file__).parent / "giselo-browser-daemon"
-LOG_FILE    = pathlib.Path("/tmp/crowia/browser.log")
+PID_FILE = pathlib.Path("/tmp/crowia/browser.pid")
+DAEMON = pathlib.Path(__file__).parent / "giselo-browser-daemon"
+LOG_FILE = pathlib.Path("/tmp/crowia/browser.log")
 CONFIG_FILE = pathlib.Path(__file__).parent.parent / "config.yaml"
 
-# Read browser type from config.yaml (default: firefox)
+
+# Read browser type from config.yaml (default: chromium)
 def _read_browser_type() -> str:
     try:
-        import yaml
-        cfg = yaml.safe_load(CONFIG_FILE.read_text())
-        return cfg.get("browser", {}).get("type", "firefox")
+        text = CONFIG_FILE.read_text()
+        in_browser = False
+        for line in text.splitlines():
+            stripped = line.rstrip()
+            if stripped == "browser:":
+                in_browser = True
+            elif in_browser and stripped.startswith("  type:"):
+                val = stripped.split(":", 1)[1].strip().strip('"').strip("'")
+                val = val.split("#")[0].strip()
+                if val in ("firefox", "chromium", "chrome"):
+                    return val
+                break
+            elif in_browser and stripped and not stripped.startswith(" "):
+                break
     except Exception:
-        return "firefox"
+        pass
+    return "chromium"
+
 
 BROWSER_TYPE = _read_browser_type()
 
@@ -65,8 +80,7 @@ def kill_stale():
     """Kill any lingering daemon processes and clean up socket."""
     try:
         result = subprocess.run(
-            ["pgrep", "-f", "giselo-browser-daemon"],
-            capture_output=True, text=True
+            ["pgrep", "-f", "giselo-browser-daemon"], capture_output=True, text=True
         )
         for pid in result.stdout.strip().split():
             try:
@@ -203,9 +217,11 @@ def main():
         i = 1
         while i < len(args):
             if args[i] == "--selector" and i + 1 < len(args):
-                cmd["selector"] = args[i + 1]; i += 2
+                cmd["selector"] = args[i + 1]
+                i += 2
             elif args[i] == "--format" and i + 1 < len(args):
-                cmd["format"] = args[i + 1]; i += 2
+                cmd["format"] = args[i + 1]
+                i += 2
             else:
                 i += 1
         sys.exit(run(cmd))
@@ -217,7 +233,9 @@ def main():
     if action == "scroll":
         direction = args[1] if len(args) > 1 else "down"
         amount = args[2] if len(args) > 2 else "3"
-        sys.exit(run({"action": "scroll", "direction": direction, "amount": int(amount)}))
+        sys.exit(
+            run({"action": "scroll", "direction": direction, "amount": int(amount)})
+        )
 
     if action == "tabs":
         sys.exit(run({"action": "tabs"}))
@@ -240,7 +258,9 @@ def main():
         code = " ".join(args[1:])
         sys.exit(run({"action": "eval", "code": code}))
 
-    print(f"Acción desconocida: '{action}'. Usa 'giselo-browser' sin args para ver ayuda.")
+    print(
+        f"Acción desconocida: '{action}'. Usa 'giselo-browser' sin args para ver ayuda."
+    )
     sys.exit(1)
 
 

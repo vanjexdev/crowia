@@ -151,6 +151,23 @@ def main():
             ui("done")
             return
 
+        if intents.skill_disable:
+            msg = assistant.disable_skill(intents.skill_disable)
+            output.show("Giselo", msg)
+            ui("done")
+            return
+
+        if intents.skill_enable:
+            msg = assistant.enable_skill(intents.skill_enable)
+            output.show("Giselo", msg)
+            ui("done")
+            return
+
+        if intents.skill_list:
+            output.show("Giselo", assistant.list_skills())
+            ui("done")
+            return
+
         if intents.clear_history:
             history.clear()
             output.show("Crowia", "Historial borrado.")
@@ -274,6 +291,23 @@ def main():
                 if overlay:
                     overlay.set_backend(assistant.current_backend_name)
                 output.show("Giselo", msg)
+                ui("done")
+                return
+
+            if intents.skill_disable:
+                msg = assistant.disable_skill(intents.skill_disable)
+                output.show("Giselo", msg)
+                ui("done")
+                return
+
+            if intents.skill_enable:
+                msg = assistant.enable_skill(intents.skill_enable)
+                output.show("Giselo", msg)
+                ui("done")
+                return
+
+            if intents.skill_list:
+                output.show("Giselo", assistant.list_skills())
                 ui("done")
                 return
 
