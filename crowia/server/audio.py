@@ -69,5 +69,8 @@ def _tts_python_api(text: str, cmd: list[str]) -> bytes:
     voice = PiperVoice.load(model_path)
     buf = io.BytesIO()
     with wave.open(buf, "wb") as wav_file:
+        wav_file.setnchannels(1)
+        wav_file.setsampwidth(2)
+        wav_file.setframerate(voice.config.sample_rate)
         voice.synthesize(text, wav_file)
     return buf.getvalue()
