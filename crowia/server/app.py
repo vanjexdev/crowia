@@ -13,6 +13,8 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+import os
+
 from crowia.config import load as load_config
 from crowia.transcriber import Transcriber
 from crowia.assistant import Assistant
@@ -23,7 +25,7 @@ log = logging.getLogger("giselo.server")
 
 WEB_DIR = pathlib.Path(__file__).parent / "web"
 
-cfg = load_config()
+cfg = load_config(os.environ.get("CROWIA_CONFIG"))
 transcriber = Transcriber(cfg)
 assistant = Assistant(cfg)
 history = ConversationHistory(

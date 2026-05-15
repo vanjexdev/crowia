@@ -24,6 +24,10 @@ def main():
         format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
     )
 
+    import os
+    if args.config:
+        os.environ["CROWIA_CONFIG"] = args.config
+
     try:
         import uvicorn
     except ImportError:
