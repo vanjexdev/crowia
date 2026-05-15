@@ -67,10 +67,5 @@ def _tts_python_api(text: str, cmd: list[str]) -> bytes:
         raise RuntimeError("--model not found in tts_command")
 
     voice = PiperVoice.load(model_path)
-    buf = io.BytesIO()
-    with wave.open(buf, "wb") as wav_file:
-        wav_file.setnchannels(1)
-        wav_file.setsampwidth(2)
-        wav_file.setframerate(voice.config.sample_rate)
-        voice.synthesize(text, wav_file)
-    return buf.getvalue()
+    pcm = b"".join(voice.synthesize_stream_raw(text))
+    return pcm_to_wav_bytes(pcm, sample_rate=voice.config.sample_rate)
