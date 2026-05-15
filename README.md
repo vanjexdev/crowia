@@ -17,6 +17,8 @@ Asistente de voz para Linux (KDE Plasma / Wayland) que escucha comandos, los tra
 - **sounddevice + webrtcvad** — modo siempre activo con wake word
 - **spectacle** — capturas de pantalla (KDE Wayland)
 - **pactl** — control de volumen
+- **FastAPI + uvicorn** — servidor web para acceso remoto vía PWA
+- **marked.js** — renderizado de markdown en el chat web
 
 ## Modos de uso
 
@@ -340,27 +342,96 @@ systemctl --user daemon-reload
 systemctl --user enable --now crowia
 ```
 
+## Giselo Web (acceso remoto vía PWA)
+
+Servidor web con WebSocket que permite usar Giselo desde cualquier dispositivo en la red Tailscale — celular, tablet, PC remota.
+
+### Características
+- **Chat con streaming** — respuestas en tiempo real mientras Claude genera
+- **Voz bidireccional** — graba desde el browser → Whisper transcribe → piper-tts responde con audio
+- **Material Design 3** — UI adaptativa: navigation rail en desktop/tablet, bottom nav estilo Android en mobile
+- **PWA instalable** — Chrome → "Agregar a pantalla de inicio" → queda como app nativa
+- **Markdown** — respuestas renderizadas con formato (negritas, listas, código)
+- **TTS sin símbolos** — piper-tts recibe texto plano, sin asteriscos ni markdown
+
+### Requisitos en el servidor
+```bash
+# En la máquina que corre el servidor (VM o host)
+pip install fastapi 'uvicorn[standard]' piper-tts
+sudo apt install -y ffmpeg   # para convertir audio del browser a WAV
+```
+
+### Arranque
+```bash
+# Config mínimo (si piper-tts está en ruta diferente a la del host)
+nano ~/config.server.yaml
+# output:
+#   tts_enabled: true
+#   tts_command: ["/ruta/a/piper-tts", "--model", "/ruta/al/modelo.onnx", "--output_raw"]
+
+python3 run_server.py --port 8181 \
+  --config ~/config.server.yaml \
+  --ssl-cert /ruta/cert.crt \
+  --ssl-key  /ruta/cert.key
+```
+
+### HTTPS (requerido para micrófono)
+```bash
+# Habilitar en tailscale.com/admin → DNS → HTTPS Certificates
+sudo tailscale cert <hostname>.ts.net
+
+python3 run_server.py --port 8181 \
+  --ssl-cert <hostname>.ts.net.crt \
+  --ssl-key  <hostname>.ts.net.key
+```
+
+Acceso: `https://<hostname>.ts.net:8181`
+
+### Flags de run_server.py
+
+| Flag | Default | Descripción |
+|------|---------|-------------|
+| `--port` | 8080 | Puerto de escucha |
+| `--host` | 0.0.0.0 | Dirección de bind |
+| `--config` | config.yaml | Config a cargar |
+| `--ssl-cert` | — | Certificado TLS (.crt) |
+| `--ssl-key` | — | Clave privada TLS (.key) |
+| `--debug` | false | Reload automático + logs verbosos |
+
+---
+
 ## Estructura del proyecto
 
 ```
 crowia/
-├── crowia.py           # Entry point, pipeline principal
-├── config.yaml         # Configuración
-├── config.local.yaml   # Generado por giselo-doctor (no committear)
-├── crowia.service      # Servicio systemd
-├── setup.sh            # Script de instalación
+├── crowia.py               # Entry point, pipeline principal
+├── run_server.py           # Entry point del servidor web
+├── config.yaml             # Configuración
+├── config.local.yaml       # Generado por giselo-doctor (no committear)
+├── crowia.service          # Servicio systemd
+├── setup.sh                # Script de instalación
 ├── scripts/
-│   └── giselo-doctor   # Diagnóstico de OS y generación de config.local.yaml
+│   └── giselo-doctor       # Diagnóstico de OS y generación de config.local.yaml
 └── crowia/
-    ├── config.py       # Carga y merge de configuración
-    ├── hotkey.py       # Listener de teclado (evdev, async)
-    ├── recorder.py     # Grabación de audio (arecord)
-    ├── transcriber.py  # Whisper (modelo cargado una vez en memoria)
-    ├── assistant.py    # Claude CLI (texto) + API (visión)
-    ├── output.py       # Notificaciones + TTS piper
-    ├── history.py      # Historial de conversación (JSON)
-    ├── always_on.py    # Wake word + VAD (modo siempre activo)
-    ├── intent.py       # Detección de intents en español
-    ├── screen.py       # Captura de pantalla (spectacle/grim)
-    └── system_control.py  # Control de volumen (pactl)
+    ├── config.py           # Carga y merge de configuración
+    ├── hotkey.py           # Listener de teclado (evdev, async)
+    ├── recorder.py         # Grabación de audio (arecord)
+    ├── transcriber.py      # Whisper (modelo cargado una vez en memoria)
+    ├── assistant.py        # Claude CLI (texto) + API (visión)
+    ├── output.py           # Notificaciones + TTS piper
+    ├── history.py          # Historial de conversación (JSON)
+    ├── always_on.py        # Wake word + VAD (modo siempre activo)
+    ├── intent.py           # Detección de intents en español
+    ├── screen.py           # Captura de pantalla (spectacle/grim)
+    ├── system_control.py   # Control de volumen (pactl)
+    └── server/
+        ├── app.py          # FastAPI + WebSocket (voz + texto + TTS)
+        ├── audio.py        # Conversión WebM→WAV (ffmpeg) + piper-tts→WAV
+        └── web/
+            ├── index.html  # Shell PWA
+            ├── app.js      # Lógica principal (chat, nav, settings)
+            ├── audio.js    # MediaRecorder + Web Audio API
+            ├── style.css   # Material Design 3
+            ├── manifest.json
+            └── sw.js       # Service worker (offline shell)
 ```
