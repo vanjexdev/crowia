@@ -11,7 +11,7 @@ try:
 except ImportError:
     _MD_AVAILABLE = False
 
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QObject, QMetaObject
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QObject
 from PyQt6.QtGui import QPixmap, QPainter, QColor, QFont
 from PyQt6.QtWidgets import (
     QApplication, QCheckBox, QDialog, QDialogButtonBox,
@@ -222,19 +222,15 @@ class TextInputPanel(QWidget):
             cmd = [picker, "--dir"] if folder else [picker]
             try:
                 result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-                if result.returncode == 0 and result.stdout.strip():
-                    self._pending_file_path = result.stdout.strip()
-                    QMetaObject.invokeMethod(
-                        self, "_emit_pending_file", Qt.ConnectionType.QueuedConnection
-                    )
+                path = result.stdout.strip()
+                if result.returncode == 0 and path:
+                    log.debug("Picker returned: %s", path)
+                    self._file_ready.emit(path)
+                else:
+                    log.debug("Picker cancelled or empty (rc=%d)", result.returncode)
             except Exception as e:
                 log.error("File picker failed: %s", e)
         threading.Thread(target=_run, daemon=True).start()
-
-    def _emit_pending_file(self):
-        if self._pending_file_path:
-            self._file_ready.emit(self._pending_file_path)
-            self._pending_file_path = None
 
     def _add_chip(self, path: pathlib.Path):
         if path in self._files:
