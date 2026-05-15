@@ -176,12 +176,14 @@ class TextInputPanel(QWidget):
         self._edit.setStyleSheet(_INPUT_STYLE)
         layout.addWidget(self._edit)
 
-        # Chips row — separate from action buttons so they never get squeezed
-        self._chips_row = QHBoxLayout()
-        self._chips_row.setContentsMargins(0, 0, 0, 0)
-        self._chips_row.setSpacing(3)
-        self._chips_row.addStretch()
-        layout.addLayout(self._chips_row)
+        # Chips container — real QWidget so geometry updates propagate
+        self._chips_widget = QWidget()
+        self._chips_widget.hide()  # hidden until first chip added
+        chips_inner = QHBoxLayout(self._chips_widget)
+        chips_inner.setContentsMargins(0, 2, 0, 2)
+        chips_inner.setSpacing(3)
+        self._chips_row = chips_inner
+        layout.addWidget(self._chips_widget)
 
         # Action buttons row
         btns = QHBoxLayout()
@@ -237,22 +239,22 @@ class TextInputPanel(QWidget):
         threading.Thread(target=_run, daemon=True).start()
 
     def _add_chip(self, path: pathlib.Path):
-        log.info("Adding chip: %s (files so far: %d)", path, len(self._files))
         if path in self._files:
             return
         self._files.append(path)
         btn = QPushButton(f"📎 {path.name} ✕")
         btn.setStyleSheet(_CHIP_STYLE)
-        btn.setParent(self)
         btn.clicked.connect(lambda checked=False, p=path, b=btn: self._remove_chip(p, b))
-        self._chips_row.insertWidget(self._chips_row.count() - 1, btn)
-        btn.show()
-        log.info("Chip added, chips_row count: %d", self._chips_row.count())
+        self._chips_row.addWidget(btn)
+        self._chips_widget.show()
+        log.info("Chip added: %s (total: %d)", path.name, len(self._files))
 
     def _remove_chip(self, path: pathlib.Path, btn: QPushButton):
         if path in self._files:
             self._files.remove(path)
         btn.deleteLater()
+        if not self._files:
+            self._chips_widget.hide()
 
     def _submit(self):
         text = self._edit.toPlainText().strip()
@@ -266,6 +268,7 @@ class TextInputPanel(QWidget):
             w = self._chips_row.itemAt(i).widget()
             if w:
                 w.deleteLater()
+        self._chips_widget.hide()
 
 
 class PrefsDialog(QDialog):
