@@ -1,0 +1,432 @@
+#!/usr/bin/env python3
+"""giselo-doctor — diagnóstico del sistema y generación de config.local.yaml"""
+
+import importlib
+import os
+import pathlib
+import platform
+import shutil
+import subprocess
+import sys
+
+# ── colores ────────────────────────────────────────────────────────────────────
+_NO_COLOR = not sys.stdout.isatty() or os.environ.get("NO_COLOR")
+def _c(code, text): return text if _NO_COLOR else f"\033[{code}m{text}\033[0m"
+OK   = _c("92", "✓")
+WARN = _c("93", "⚠")
+FAIL = _c("91", "✗")
+BOLD = lambda t: _c("1", t)
+DIM  = lambda t: _c("2", t)
+CYAN = lambda t: _c("96", t)
+
+PROJECT_ROOT = pathlib.Path(__file__).parent.parent
+CONFIG_LOCAL  = PROJECT_ROOT / "config.local.yaml"
+
+_issues: list[str] = []     # (icon, label, install_hint)
+_install_hints: list[str] = []
+
+def _check(label: str, ok: bool, detail: str = "", hint: str = "") -> bool:
+    icon = OK if ok else FAIL
+    suffix = f"  {DIM(detail)}" if detail else ""
+    print(f"    {icon} {label}{suffix}")
+    if not ok and hint:
+        _install_hints.append(f"  # {label}\n  {hint}")
+    return ok
+
+
+# ── detección de OS ────────────────────────────────────────────────────────────
+
+def detect_os() -> dict:
+    system = platform.system()
+
+    if system == "Linux":
+        info: dict[str, str] = {}
+        try:
+            for line in pathlib.Path("/etc/os-release").read_text().splitlines():
+                if "=" in line:
+                    k, v = line.split("=", 1)
+                    info[k.strip()] = v.strip().strip('"')
+        except Exception:
+            pass
+
+        distro = info.get("ID", "linux").lower()
+        id_like = info.get("ID_LIKE", "").lower()
+        name = info.get("NAME", "Linux")
+
+        if distro in ("arch", "cachyos", "manjaro", "endeavouros", "garuda") or "arch" in id_like:
+            family, pkg = "arch", "paru" if shutil.which("paru") else "pacman"
+        elif distro in ("ubuntu", "debian", "linuxmint", "pop", "elementary") or "debian" in id_like or "ubuntu" in id_like:
+            family, pkg = "debian", "apt"
+        elif distro in ("fedora", "rhel", "centos", "rocky", "almalinux") or "fedora" in id_like or "rhel" in id_like:
+            family, pkg = "fedora", "dnf"
+        elif "suse" in distro or "suse" in id_like:
+            family, pkg = "suse", "zypper"
+        else:
+            family, pkg = "linux", "apt"
+
+        desktop = os.environ.get("XDG_CURRENT_DESKTOP", "").lower()
+        return dict(platform="linux", distro=distro, name=name,
+                    family=family, pkg=pkg, desktop=desktop)
+
+    elif system == "Darwin":
+        ver = platform.mac_ver()[0]
+        return dict(platform="darwin", distro="macos", name=f"macOS {ver}",
+                    family="darwin", pkg="brew" if shutil.which("brew") else "", desktop="aqua")
+
+    elif system == "Windows":
+        return dict(platform="windows", distro="windows", name=f"Windows {platform.version()}",
+                    family="windows", pkg="winget" if shutil.which("winget") else "choco", desktop="windows")
+
+    return dict(platform=system.lower(), distro=system.lower(), name=system,
+                family="unknown", pkg="", desktop="")
+
+
+def install(os_info: dict, by_family: dict) -> str | None:
+    """Devuelve el comando de instalación correcto para este OS."""
+    pkg = (by_family.get(os_info["family"])
+           or by_family.get(os_info["platform"])
+           or by_family.get("any"))
+    if not pkg:
+        return None
+    pm = os_info["pkg"]
+    if pm in ("paru", "pacman"):   return f"{pm} -S {pkg}"
+    if pm == "apt":                return f"sudo apt install -y {pkg}"
+    if pm == "dnf":                return f"sudo dnf install -y {pkg}"
+    if pm == "zypper":             return f"sudo zypper install -y {pkg}"
+    if pm == "brew":               return f"brew install {pkg}"
+    if pm in ("winget", "choco"):  return f"{pm} install {pkg}"
+    return f"# instalar: {pkg}"
+
+
+# ── checks ─────────────────────────────────────────────────────────────────────
+
+def check_python():
+    v = sys.version_info
+    ok = v >= (3, 10)
+    _check("Python", ok,
+           detail=f"{v.major}.{v.minor}.{v.micro}",
+           hint="Instala Python 3.10+ desde python.org")
+
+
+def check_faster_whisper():
+    try:
+        import faster_whisper
+        ver = getattr(faster_whisper, "__version__", "?")
+        _check("faster-whisper", True, detail=ver)
+    except ImportError:
+        _check("faster-whisper", False,
+               hint=f"{sys.executable} -m pip install faster-whisper")
+
+
+def check_claude_cli():
+    path = shutil.which("claude")
+    if path:
+        try:
+            r = subprocess.run(["claude", "--version"], capture_output=True, text=True, timeout=5)
+            ver = r.stdout.strip().splitlines()[0] if r.stdout else "?"
+            _check("Claude CLI", True, detail=ver)
+        except Exception:
+            _check("Claude CLI", True, detail=path)
+    else:
+        _check("Claude CLI", False,
+               hint="npm install -g @anthropic-ai/claude-code  # o ver docs.anthropic.com")
+
+
+def check_audio(os_info: dict) -> str:
+    """Retorna el backend de audio detectado."""
+    if os_info["platform"] == "linux":
+        ok = bool(shutil.which("arecord"))
+        _check("arecord (grabación)", ok,
+               hint=install(os_info, {"arch": "alsa-utils", "debian": "alsa-utils",
+                                       "fedora": "alsa-utils", "suse": "alsa-utils"}))
+        return "arecord" if ok else ""
+
+    elif os_info["platform"] == "darwin":
+        ok = bool(shutil.which("sox"))
+        _check("sox (grabación)", ok,
+               hint=install(os_info, {"darwin": "sox"}))
+        return "sox" if ok else ""
+
+    elif os_info["platform"] == "windows":
+        try:
+            import sounddevice
+            _check("sounddevice (grabación)", True)
+            return "sounddevice"
+        except ImportError:
+            _check("sounddevice (grabación)", False,
+                   hint=f"{sys.executable} -m pip install sounddevice")
+            return ""
+    return ""
+
+
+def check_tts(os_info: dict) -> list[str]:
+    """Retorna el comando TTS detectado."""
+    if os_info["platform"] == "darwin":
+        _check("say (TTS)", True, detail="nativo macOS")
+        return ["say", "-r", "180"]
+
+    if os_info["platform"] == "windows":
+        espeak = shutil.which("espeak-ng") or shutil.which("espeak")
+        if espeak:
+            _check("espeak-ng (TTS)", True, detail=espeak)
+            return [espeak, "-s", "160", "-v", "es"]
+        _check("espeak-ng (TTS)", False,
+               hint=install(os_info, {"windows": "espeak-ng"}))
+        return ["espeak-ng", "-s", "160", "-v", "es"]
+
+    # Linux
+    piper = shutil.which("piper-tts") or shutil.which("piper")
+    if piper:
+        _check("piper-tts (TTS)", True, detail=piper)
+        return [piper, "--model", "~/.local/share/piper/es_ES-davefx-medium.onnx", "--output_raw"]
+    espeak = shutil.which("espeak-ng") or shutil.which("espeak")
+    if espeak:
+        _check("piper-tts", False, detail="no encontrado — usando espeak-ng",
+               hint=install(os_info, {"arch": "piper-tts", "debian": "# ver ghcr.io/rhasspy/piper"}))
+        _check("espeak-ng (TTS fallback)", True, detail=espeak)
+        return [espeak, "-s", "160", "-v", "es"]
+    _check("TTS", False,
+           hint=install(os_info, {"arch": "piper-tts espeak-ng", "debian": "espeak-ng",
+                                   "fedora": "espeak-ng", "suse": "espeak-ng"}))
+    return ["espeak-ng", "-s", "160", "-v", "es"]
+
+
+def check_notify(os_info: dict) -> str:
+    if os_info["platform"] == "darwin":
+        ok = bool(shutil.which("terminal-notifier"))
+        _check("terminal-notifier", ok,
+               hint=install(os_info, {"darwin": "terminal-notifier"}))
+        return "terminal-notifier" if ok else "osascript"
+
+    if os_info["platform"] == "windows":
+        try:
+            import win10toast
+            _check("win10toast", True)
+            return "win10toast"
+        except ImportError:
+            _check("win10toast", False,
+                   hint=f"{sys.executable} -m pip install win10toast")
+            return ""
+
+    # Linux
+    ok = bool(shutil.which("notify-send"))
+    _check("notify-send", ok,
+           hint=install(os_info, {"arch": "libnotify", "debian": "libnotify-bin",
+                                   "fedora": "libnotify", "suse": "libnotify-tools"}))
+    return "notify-send" if ok else ""
+
+
+def check_hotkey(os_info: dict) -> str:
+    if os_info["platform"] == "linux":
+        try:
+            import evdev
+            _check("evdev (hotkey)", True, detail=getattr(evdev, "__version__", "?"))
+            return "evdev"
+        except ImportError:
+            _check("evdev (hotkey)", False,
+                   hint=install(os_info, {"arch": "python-evdev", "debian": "python3-evdev",
+                                           "fedora": "python3-evdev", "any": f"{sys.executable} -m pip install evdev"}))
+    # macOS / Windows → pynput
+    try:
+        import pynput
+        _check("pynput (hotkey)", True)
+        return "pynput"
+    except ImportError:
+        _check("pynput (hotkey)", False,
+               hint=f"{sys.executable} -m pip install pynput")
+        return ""
+
+
+def check_picker(os_info: dict) -> str:
+    if os_info["platform"] == "darwin":
+        _check("osascript (picker)", True, detail="nativo macOS")
+        return "osascript"
+    if os_info["platform"] == "windows":
+        _check("PowerShell (picker)", True, detail="nativo Windows")
+        return "powershell"
+    # Linux
+    if shutil.which("kdialog"):
+        _check("kdialog (picker)", True)
+        return "kdialog"
+    if shutil.which("zenity"):
+        _check("zenity (picker)", True)
+        return "zenity"
+    _check("kdialog / zenity (picker)", False,
+           hint=install(os_info, {"arch": "kdialog", "debian": "zenity",
+                                   "fedora": "zenity", "suse": "kdialog"}))
+    return ""
+
+
+def check_media(os_info: dict) -> str:
+    if os_info["platform"] == "darwin":
+        _check("AppleScript (media)", True, detail="nativo macOS")
+        return "osascript"
+    if os_info["platform"] == "windows":
+        _check("control de media", False, detail="no hay equivalente confiable en Windows")
+        return ""
+    ok = bool(shutil.which("playerctl"))
+    _check("playerctl (media)", ok,
+           hint=install(os_info, {"arch": "playerctl", "debian": "playerctl",
+                                   "fedora": "playerctl", "suse": "playerctl"}))
+    return "playerctl" if ok else ""
+
+
+def check_playwright(os_info: dict):
+    try:
+        import playwright
+        _check("playwright (browser)", True, detail=getattr(playwright, "__version__", "?"))
+        # Check chromium binary
+        chromium = shutil.which("chromium") or shutil.which("chromium-browser") or shutil.which("google-chrome")
+        if chromium:
+            _check("chromium", True, detail=chromium)
+        else:
+            _check("chromium (Playwright bundled)", None is None,  # could be installed via playwright
+                   hint="python -m playwright install chromium")
+    except ImportError:
+        _check("playwright", False,
+               hint=f"{sys.executable} -m pip install playwright && python -m playwright install chromium")
+
+
+def check_yaml():
+    try:
+        import yaml
+        _check("PyYAML", True, detail=getattr(yaml, "__version__", "?"))
+    except ImportError:
+        _check("PyYAML", False,
+               hint=f"{sys.executable} -m pip install pyyaml")
+
+
+def check_pyqt6():
+    try:
+        from PyQt6.QtCore import PYQT_VERSION_STR
+        _check("PyQt6", True, detail=PYQT_VERSION_STR)
+    except ImportError:
+        _check("PyQt6", False,
+               hint=f"{sys.executable} -m pip install PyQt6")
+
+
+# ── generación config.local.yaml ───────────────────────────────────────────────
+
+def write_config_local(os_info: dict, audio_backend: str, tts_cmd: list,
+                        notify_backend: str, hotkey_backend: str,
+                        picker_backend: str, media_backend: str):
+    import textwrap
+
+    def _quote_list(lst):
+        return "[" + ", ".join(f'"{x}"' for x in lst) + "]"
+
+    lines = [
+        "# Auto-generado por giselo-doctor — puedes editar manualmente",
+        f"# OS: {os_info['name']} ({os_info['family']})",
+        "",
+        "os:",
+        f"  platform: {os_info['platform']}",
+        f"  distro: {os_info['distro']}",
+        f"  distro_family: {os_info['family']}",
+        f"  pkg_mgr: {os_info['pkg']}",
+        "",
+    ]
+
+    if tts_cmd:
+        lines += [
+            "output:",
+            f"  tts_command: {_quote_list(tts_cmd)}",
+            "",
+        ]
+
+    lines += [
+        "doctor:",
+        f"  audio_backend: {audio_backend or 'unknown'}",
+        f"  notify_backend: {notify_backend or 'unknown'}",
+        f"  hotkey_backend: {hotkey_backend or 'unknown'}",
+        f"  picker_backend: {picker_backend or 'unknown'}",
+        f"  media_backend: {media_backend or 'none'}",
+    ]
+
+    CONFIG_LOCAL.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    print(f"\n  {OK} Escrito: {CONFIG_LOCAL}")
+
+
+# ── main ───────────────────────────────────────────────────────────────────────
+
+def main():
+    print(f"\n{BOLD('╔══════════════════════════════════════╗')}")
+    print(f"{BOLD('║        giselo-doctor  v1.0           ║')}")
+    print(f"{BOLD('╚══════════════════════════════════════╝')}\n")
+
+    os_info = detect_os()
+    print(f"  {CYAN('Sistema')}: {BOLD(os_info['name'])}")
+    print(f"  {CYAN('Familia')}: {os_info['family']}  |  {CYAN('Pkg')}: {os_info['pkg']}")
+    if os_info["platform"] == "linux":
+        print(f"  {CYAN('Desktop')}: {os_info.get('desktop') or 'desconocido'}")
+    print()
+
+    print(BOLD("  Python y dependencias core"))
+    check_python()
+    check_yaml()
+    check_pyqt6()
+    check_faster_whisper()
+    check_claude_cli()
+
+    print()
+    print(BOLD("  Audio"))
+    audio_backend = check_audio(os_info)
+
+    print()
+    print(BOLD("  TTS (síntesis de voz)"))
+    tts_cmd = check_tts(os_info)
+
+    print()
+    print(BOLD("  Notificaciones"))
+    notify_backend = check_notify(os_info)
+
+    print()
+    print(BOLD("  Hotkey (atajo de teclado)"))
+    hotkey_backend = check_hotkey(os_info)
+
+    print()
+    print(BOLD("  File picker (selector de archivos)"))
+    picker_backend = check_picker(os_info)
+
+    print()
+    print(BOLD("  Control de media"))
+    media_backend = check_media(os_info)
+
+    print()
+    print(BOLD("  Browser (skill)"))
+    check_playwright(os_info)
+
+    # ── instalación hints ──────────────────────────────────────────────────────
+    if _install_hints:
+        print(f"\n{BOLD('  ── Paquetes faltantes ──────────────────────────')}")
+        for h in _install_hints:
+            print(h)
+
+    # ── config.local.yaml ──────────────────────────────────────────────────────
+    print(f"\n{BOLD('  ── Generando config.local.yaml ─────────────────')}")
+    write_config_local(os_info, audio_backend, tts_cmd,
+                        notify_backend, hotkey_backend,
+                        picker_backend, media_backend)
+
+    print(f"\n{BOLD('  ── Resumen ─────────────────────────────────────')}")
+    warnings = []
+    if os_info["platform"] != "linux":
+        warnings.append("evdev no disponible — hotkey requiere pynput (soporte experimental)")
+    if not audio_backend:
+        warnings.append("Sin backend de audio — grabación de voz no funcionará")
+    if not tts_cmd:
+        warnings.append("Sin TTS — respuestas solo en texto")
+    if os_info["platform"] == "windows":
+        warnings.append("Windows: evdev, playerctl y kdialog no tienen equivalente — funcionalidad limitada")
+
+    if warnings:
+        for w in warnings:
+            print(f"    {WARN} {w}")
+    else:
+        print(f"    {OK} Todo listo para correr Giselo en {os_info['name']}")
+
+    print()
+
+
+if __name__ == "__main__":
+    main()

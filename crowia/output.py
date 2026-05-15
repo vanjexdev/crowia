@@ -91,7 +91,8 @@ class OutputHandler:
         if not text.strip():
             return
 
-        cmd = self.tts_command
+        cmd = [str(pathlib.Path(c).expanduser()) if c.startswith("~") else c
+               for c in self.tts_command]
         is_piper = cmd and "piper-tts" in cmd[0]
 
         if is_piper:
