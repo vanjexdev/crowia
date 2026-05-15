@@ -36,8 +36,17 @@ def pcm_to_wav_bytes(pcm: bytes, sample_rate: int = 22050, channels: int = 1) ->
 
 
 def tts_to_wav_bytes(text: str, tts_cmd: list[str]) -> bytes:
-    """Run piper-tts and return WAV bytes. tts_cmd must include --output_raw."""
+    """Run piper-tts and return WAV bytes.
+
+    If the binary in tts_cmd doesn't exist, falls back to the piper-tts
+    Python API (pip install piper-tts) using the --model path from tts_cmd.
+    """
     cmd = [str(pathlib.Path(c).expanduser()) if c.startswith("~") else c for c in tts_cmd]
+    binary = pathlib.Path(cmd[0])
+
+    if not binary.exists():
+        return _tts_python_api(text, cmd)
+
     proc = subprocess.run(
         cmd,
         input=text.encode(),
@@ -45,3 +54,20 @@ def tts_to_wav_bytes(text: str, tts_cmd: list[str]) -> bytes:
         stderr=subprocess.DEVNULL,
     )
     return pcm_to_wav_bytes(proc.stdout)
+
+
+def _tts_python_api(text: str, cmd: list[str]) -> bytes:
+    """Synthesize via piper-tts Python package (no binary needed)."""
+    from piper.voice import PiperVoice  # type: ignore
+
+    try:
+        model_idx = cmd.index("--model") + 1
+        model_path = str(pathlib.Path(cmd[model_idx]).expanduser())
+    except (ValueError, IndexError):
+        raise RuntimeError("--model not found in tts_command")
+
+    voice = PiperVoice.load(model_path)
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as wav_file:
+        voice.synthesize(text, wav_file)
+    return buf.getvalue()
