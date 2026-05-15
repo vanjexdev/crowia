@@ -462,6 +462,7 @@ class CrowiaOverlay(QWidget):
         self.setCursor(Qt.CursorShape.SizeAllCursor)
         self._set_image("idle")
         self._move_bottom_right()
+        QTimer.singleShot(0, self._restore_splitter_sizes)
 
     # ── public thread-safe API ────────────────────────────────────────────────
 
@@ -588,6 +589,12 @@ class CrowiaOverlay(QWidget):
         px = self._pixmaps.get(state, self._pixmaps.get("idle"))
         if px:
             self._crow.setPixmap(px)
+
+    def _restore_splitter_sizes(self):
+        mode = self._prefs.get("layout_mode", "horizontal")
+        sizes_key = "splitter_sizes_h" if mode == "horizontal" else "splitter_sizes_v"
+        defaults = [340, 720] if mode == "horizontal" else [340, 600]
+        self._splitter.setSizes(self._prefs.get(sizes_key, defaults))
 
     def _preferred_width(self) -> int:
         mode = self._prefs.get("layout_mode", "horizontal")
