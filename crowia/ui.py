@@ -6,7 +6,7 @@ from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QObject
 from PyQt6.QtGui import QPixmap, QPainter, QColor, QFont
 from PyQt6.QtWidgets import (
     QApplication, QCheckBox, QDialog, QDialogButtonBox,
-    QLabel, QTextBrowser, QVBoxLayout, QWidget,
+    QHBoxLayout, QLabel, QPushButton, QTextBrowser, QVBoxLayout, QWidget,
 )
 
 from . import prefs as prefs_mod
@@ -26,6 +26,7 @@ CROW_SIZE = 360
 class _Signals(QObject):
     state    = pyqtSignal(str)
     response = pyqtSignal(str)
+    cancel   = pyqtSignal()
 
 
 class AudioBars(QWidget):
@@ -96,9 +97,10 @@ class PrefsDialog(QDialog):
 
 
 class CrowiaOverlay(QWidget):
-    def __init__(self):
+    def __init__(self, on_cancel=None):
         super().__init__()
         self._prefs = prefs_mod.load()
+        self._on_cancel = on_cancel  # callable invoked when user clicks cancel
 
         self.setWindowTitle("Giselo")
         self.setWindowFlags(
@@ -136,6 +138,30 @@ class CrowiaOverlay(QWidget):
         self._bars.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
         layout.addWidget(self._bars)
 
+        # Cancel button row
+        btn_row = QHBoxLayout()
+        btn_row.setContentsMargins(0, 2, 0, 2)
+        self._cancel_btn = QPushButton("⏹ Cancelar")
+        self._cancel_btn.setStyleSheet(
+            "QPushButton {"
+            "  background: rgba(180, 40, 40, 180);"
+            "  color: white;"
+            "  border: none;"
+            "  border-radius: 6px;"
+            "  padding: 5px 12px;"
+            "  font-size: 12px;"
+            "  font-weight: bold;"
+            "}"
+            "QPushButton:hover { background: rgba(220, 60, 60, 210); }"
+            "QPushButton:pressed { background: rgba(140, 20, 20, 220); }"
+        )
+        self._cancel_btn.clicked.connect(self._on_cancel_clicked)
+        self._cancel_btn.hide()
+        btn_row.addStretch()
+        btn_row.addWidget(self._cancel_btn)
+        btn_row.addStretch()
+        layout.addLayout(btn_row)
+
         self._response_box = QTextBrowser()
         self._response_box.setFont(QFont("Sans", 10))
         self._response_box.setMaximumHeight(180)
@@ -155,6 +181,7 @@ class CrowiaOverlay(QWidget):
         self._signals = _Signals()
         self._signals.state.connect(self._apply_state)
         self._signals.response.connect(self._apply_response)
+        self._signals.cancel.connect(self._on_cancel_clicked)
 
         self.setCursor(Qt.CursorShape.SizeAllCursor)
         self._set_image("idle")
@@ -182,11 +209,21 @@ class CrowiaOverlay(QWidget):
         self._set_image(state)
         if state in ("recording", "processing"):
             self._bars.start()
+            self._cancel_btn.show()
         else:
             self._bars.stop()
+            self._cancel_btn.hide()
         if state == "done":
             QTimer.singleShot(3000, lambda: self._apply_state("idle"))
         self.show()
+        self.adjustSize()
+
+    def _on_cancel_clicked(self):
+        self._cancel_btn.hide()
+        self.adjustSize()
+        if self._on_cancel:
+            import threading
+            threading.Thread(target=self._on_cancel, daemon=True).start()
 
     def _apply_response(self, text: str):
         self._response_box.setPlainText(text)

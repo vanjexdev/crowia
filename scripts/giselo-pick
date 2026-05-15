@@ -1,49 +1,45 @@
 #!/home/jesusu/Workspace/agents/crowia/.venv/bin/python3
 """
-pepito-pick [--dir] [--save] ["Título"]
-Muestra selector de archivo o carpeta, imprime path a stdout.
+giselo-pick [--dir] [--save] ["Título"]
+Selector de archivo/carpeta usando kdialog (nativo KDE). Imprime path a stdout.
   --dir   seleccionar carpeta
   --save  modo guardar
 """
 import os
+import shutil
+import subprocess
 import sys
 
-os.environ.setdefault("WAYLAND_DISPLAY", "wayland-0")
-os.environ.setdefault("DISPLAY", ":0")
 uid = os.getuid()
-os.environ.setdefault("XDG_RUNTIME_DIR", f"/run/user/{uid}")
-os.environ.setdefault("DBUS_SESSION_BUS_ADDRESS", f"unix:path=/run/user/{uid}/bus")
-os.environ.setdefault("QT_QPA_PLATFORM", "wayland")
-
-from PyQt6.QtWidgets import QApplication, QFileDialog
-from PyQt6.QtCore import Qt
+env = os.environ.copy()
+env.setdefault("WAYLAND_DISPLAY", "wayland-0")
+env.setdefault("DISPLAY", ":0")
+env.setdefault("XDG_RUNTIME_DIR", f"/run/user/{uid}")
+env.setdefault("DBUS_SESSION_BUS_ADDRESS", f"unix:path=/run/user/{uid}/bus")
 
 args = sys.argv[1:]
-mode_dir = "--dir" in args
+mode_dir  = "--dir"  in args
 mode_save = "--save" in args
-args = [a for a in args if not a.startswith("--")]
+args  = [a for a in args if not a.startswith("--")]
 title = args[0] if args else ("Seleccionar carpeta" if mode_dir else "Seleccionar archivo")
-start_dir = str(os.path.expanduser("~"))
+start = os.path.expanduser("~")
 
-app = QApplication(sys.argv)
-
-dlg = QFileDialog()
-dlg.setWindowTitle(title)
-dlg.setWindowFlags(dlg.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
-dlg.setDirectory(start_dir)
+if not shutil.which("kdialog"):
+    print("Error: kdialog no encontrado. Instala: sudo pacman -S kdialog", file=sys.stderr)
+    sys.exit(1)
 
 if mode_dir:
-    dlg.setFileMode(QFileDialog.FileMode.Directory)
-    dlg.setOption(QFileDialog.Option.ShowDirsOnly, True)
+    cmd = ["kdialog", "--title", title, "--getexistingdirectory", start]
 elif mode_save:
-    dlg.setAcceptMode(QFileDialog.AcceptMode.AcceptSave)
+    cmd = ["kdialog", "--title", title, "--getsavefilename", start]
 else:
-    dlg.setFileMode(QFileDialog.FileMode.ExistingFile)
+    cmd = ["kdialog", "--title", title, "--getopenfilename", start]
 
-if dlg.exec() == QFileDialog.DialogCode.Accepted:
-    selected = dlg.selectedFiles()
-    if selected:
-        print(selected[0], end="")
-        sys.exit(0)
+result = subprocess.run(cmd, capture_output=True, text=True, env=env)
+path = result.stdout.strip()
+if result.returncode == 0 and path:
+    sys.stdout.write(path)
+    sys.stdout.flush()
+    sys.exit(0)
 
 sys.exit(1)

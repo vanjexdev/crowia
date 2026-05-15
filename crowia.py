@@ -43,6 +43,11 @@ def main():
                         help="List keyboard input devices and exit")
     parser.add_argument("--always-on", action="store_true",
                         help="Always-on mode: wake word + VAD (no hotkey needed)")
+    parser.add_argument("--backend", choices=["claude", "opencode", "codex"],
+                        help="Override backend from config (claude|opencode|codex)")
+    parser.add_argument("--hotkey",
+                        help="Override hotkey combo, comma-separated evdev names "
+                             "(e.g. KEY_LEFTCTRL,KEY_LEFTSHIFT,KEY_LEFTALT,KEY_1)")
     args = parser.parse_args()
 
     setup_logging(args.debug)
@@ -76,9 +81,24 @@ def main():
     cfg = load_config(args.config)
     log = logging.getLogger("crowia")
 
+    if args.backend:
+        cfg["backend"] = args.backend
+    if args.hotkey:
+        cfg["hotkey"]["keys"] = [k.strip() for k in args.hotkey.split(",")]
+
     recorder = Recorder(cfg)
     transcriber = Transcriber(cfg)
     assistant = Assistant(cfg)
+
+    def on_cancel():
+        log.info("Cancel requested")
+        assistant.cancel()
+        if overlay:
+            overlay.notify("idle")
+
+    if overlay:
+        overlay._on_cancel = on_cancel
+        overlay.set_backend(assistant.current_backend_name)
     output = OutputHandler(cfg)
 
     history_cfg = cfg.get("history", {})
@@ -118,7 +138,10 @@ def main():
             return
 
         log.info("Transcribed: %s", text)
+        log.debug("Detecting intents...")
         intents = intent.detect(text)
+        log.debug("Intents: screenshot=%s volume=%s media=%s files=%s backend=%s",
+                  intents.screenshot, intents.volume, intents.media, intents.files, intents.switch_backend)
 
         if intents.switch_backend:
             msg = assistant.switch_backend(intents.switch_backend)
@@ -128,9 +151,32 @@ def main():
             ui("done")
             return
 
+        if intents.skill_disable:
+            msg = assistant.disable_skill(intents.skill_disable)
+            output.show("Giselo", msg)
+            ui("done")
+            return
+
+        if intents.skill_enable:
+            msg = assistant.enable_skill(intents.skill_enable)
+            output.show("Giselo", msg)
+            ui("done")
+            return
+
+        if intents.skill_list:
+            output.show("Giselo", assistant.list_skills())
+            ui("done")
+            return
+
         if intents.clear_history:
             history.clear()
             output.show("Crowia", "Historial borrado.")
+            ui("done")
+            return
+
+        if intents.media is not None:
+            result = system_control.control_media(intents.media)
+            output.show("Media", result)
             ui("done")
             return
 
@@ -145,6 +191,7 @@ def main():
             output.show_status("Capturando pantalla…")
             screenshot_path = screen.take_screenshot()
 
+        log.debug("Calling assistant.ask (backend=%s)...", assistant.current_backend_name)
         output.show_status(f"Preguntando a Claude: {text[:50]}…")
 
         try:
@@ -247,9 +294,32 @@ def main():
                 ui("done")
                 return
 
+            if intents.skill_disable:
+                msg = assistant.disable_skill(intents.skill_disable)
+                output.show("Giselo", msg)
+                ui("done")
+                return
+
+            if intents.skill_enable:
+                msg = assistant.enable_skill(intents.skill_enable)
+                output.show("Giselo", msg)
+                ui("done")
+                return
+
+            if intents.skill_list:
+                output.show("Giselo", assistant.list_skills())
+                ui("done")
+                return
+
             if intents.clear_history:
                 history.clear()
                 output.show("Crowia", "Historial borrado.")
+                ui("done")
+                return
+
+            if intents.media is not None:
+                result = system_control.control_media(intents.media)
+                output.show("Media", result)
                 ui("done")
                 return
 

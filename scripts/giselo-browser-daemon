@@ -1,0 +1,336 @@
+#!/home/jesusu/Workspace/agents/crowia/.venv/bin/python3
+"""
+giselo-browser-daemon [--browser firefox|chromium|chrome]
+Persistent browser via Playwright. Listens on Unix socket.
+Started automatically by giselo-browser — do not call directly.
+"""
+import argparse
+import asyncio
+import json
+import logging
+import os
+import pathlib
+import signal
+import sys
+
+uid = os.getuid()
+os.environ.setdefault("WAYLAND_DISPLAY", "wayland-0")
+os.environ.setdefault("DISPLAY", ":0")
+os.environ.setdefault("XDG_RUNTIME_DIR", f"/run/user/{uid}")
+os.environ.setdefault("DBUS_SESSION_BUS_ADDRESS", f"unix:path=/run/user/{uid}/bus")
+os.environ.setdefault("MOZ_ENABLE_WAYLAND", "1")
+
+from playwright.async_api import async_playwright, Page, BrowserContext, Playwright
+
+_args = argparse.ArgumentParser()
+_args.add_argument("--browser", default="firefox", choices=["firefox", "chromium", "chrome"])
+BROWSER_TYPE = _args.parse_args().browser
+
+SOCKET_PATH  = pathlib.Path("/tmp/crowia/browser.sock")
+PID_FILE     = pathlib.Path("/tmp/crowia/browser.pid")
+PROFILE_DIR  = pathlib.Path.home() / f".config/crowia/browser-profile/{BROWSER_TYPE}"
+LOG_FILE     = pathlib.Path("/tmp/crowia/browser.log")
+EXTRACT_MAX  = 10_000
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [browser] %(levelname)s: %(message)s",
+    handlers=[logging.FileHandler(LOG_FILE), logging.StreamHandler()],
+)
+log = logging.getLogger("browser")
+
+pw_instance: Playwright | None = None
+context: BrowserContext | None = None
+pages: list[Page] = []
+current_idx: int = 0
+_launch_lock = asyncio.Lock()
+
+
+async def launch_context():
+    global context, pages, current_idx, pw_instance
+    async with _launch_lock:
+        # Double-check inside lock
+        if context is not None and not context.is_closed():
+            return
+        if pw_instance is None:
+            pw_instance = await async_playwright().start()
+        PROFILE_DIR.mkdir(parents=True, exist_ok=True)
+        log.info("Launching %s context...", BROWSER_TYPE)
+        if BROWSER_TYPE == "firefox":
+            context = await pw_instance.firefox.launch_persistent_context(
+                str(PROFILE_DIR), headless=False,
+            )
+        elif BROWSER_TYPE == "chrome":
+            context = await pw_instance.chromium.launch_persistent_context(
+                str(PROFILE_DIR), headless=False, channel="chrome",
+            )
+        else:
+            import shutil
+            sys_chromium = shutil.which("chromium") or shutil.which("chromium-browser")
+            chromium_kwargs: dict = {"headless": False}
+            if sys_chromium:
+                chromium_kwargs["executable_path"] = sys_chromium
+            context = await pw_instance.chromium.launch_persistent_context(
+                str(PROFILE_DIR), **chromium_kwargs,
+            )
+        pages = []
+        current_idx = 0
+        log.info("%s context ready. Profile: %s", BROWSER_TYPE, PROFILE_DIR)
+
+
+def current_page() -> Page | None:
+    return pages[current_idx] if pages else None
+
+
+async def ensure_page() -> Page:
+    global pages, current_idx
+    if context is None or context.is_closed():
+        log.warning("Context closed — relaunching browser")
+        await launch_context()
+    pages = [p for p in pages if not p.is_closed()]
+    if current_idx >= len(pages):
+        current_idx = max(0, len(pages) - 1)
+    if not pages:
+        p = await context.new_page()
+        pages.append(p)
+        current_idx = 0
+    return pages[current_idx]
+
+
+# ── actions ──────────────────────────────────────────────────────────────────
+
+async def act_navigate(cmd: dict) -> dict:
+    url = cmd.get("url", "")
+    if not url.startswith(("http://", "https://")):
+        url = "https://" + url
+    page = await ensure_page()
+    await page.goto(url, wait_until="domcontentloaded", timeout=30_000)
+    return {"ok": True, "result": f"Navegando a {page.url} — {await page.title()}"}
+
+
+async def act_click(cmd: dict) -> dict:
+    page = await ensure_page()
+    selector = cmd.get("selector") or cmd.get("text", "")
+    if cmd.get("text") and not cmd.get("selector"):
+        selector = f"text={selector}"
+    try:
+        await page.click(selector, timeout=8_000)
+        return {"ok": True, "result": f"Click en '{selector}'"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+async def act_type(cmd: dict) -> dict:
+    page = await ensure_page()
+    text = cmd.get("text", "")
+    await page.keyboard.type(text, delay=30)
+    return {"ok": True, "result": f"Texto escrito: '{text}'"}
+
+
+async def act_fill(cmd: dict) -> dict:
+    page = await ensure_page()
+    selector = cmd.get("selector", "")
+    text = cmd.get("text", "")
+    try:
+        await page.fill(selector, text, timeout=8_000)
+        return {"ok": True, "result": f"Campo '{selector}' llenado"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+async def act_key(cmd: dict) -> dict:
+    page = await ensure_page()
+    key = cmd.get("key", "Enter")
+    await page.keyboard.press(key)
+    return {"ok": True, "result": f"Tecla '{key}' presionada"}
+
+
+async def act_extract(cmd: dict) -> dict:
+    page = await ensure_page()
+    selector = cmd.get("selector", "body")
+    fmt = cmd.get("format", "text")
+    try:
+        if fmt == "html":
+            content = await page.inner_html(selector)
+        elif fmt == "links":
+            links = await page.eval_on_selector_all(
+                "a[href]",
+                "els => els.map(e => ({text: e.innerText.trim(), href: e.href}))"
+            )
+            content = "\n".join(f"{l['text']}: {l['href']}" for l in links[:50])
+        else:
+            content = await page.inner_text(selector)
+        content = content[:EXTRACT_MAX]
+        return {"ok": True, "result": content}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+async def act_screenshot(cmd: dict) -> dict:
+    page = await ensure_page()
+    path = cmd.get("path", "/tmp/crowia/browser_screenshot.png")
+    await page.screenshot(path=path, full_page=cmd.get("full_page", False))
+    return {"ok": True, "result": path}
+
+
+async def act_scroll(cmd: dict) -> dict:
+    page = await ensure_page()
+    direction = cmd.get("direction", "down")
+    amount = int(cmd.get("amount", 3))
+    delta = 400 * amount * (1 if direction == "down" else -1)
+    await page.mouse.wheel(0, delta)
+    return {"ok": True, "result": f"Scroll {direction} x{amount}"}
+
+
+async def act_status(_cmd: dict) -> dict:
+    if context is None or context.is_closed():
+        return {"ok": True, "result": "Sin contexto activo (browser cerrado)"}
+    page = current_page()
+    if not page or page.is_closed():
+        return {"ok": True, "result": "Sin página abierta"}
+    title = await page.title()
+    return {"ok": True, "result": f"URL: {page.url}\nTítulo: {title}\nPestañas: {len(pages)} (actual: {current_idx + 1})"}
+
+
+async def act_tabs(_cmd: dict) -> dict:
+    if not pages:
+        return {"ok": True, "result": "Sin pestañas"}
+    lines = []
+    for i, p in enumerate(pages):
+        marker = "→" if i == current_idx else " "
+        try:
+            title = await p.title()
+        except Exception:
+            title = "?"
+        lines.append(f"{marker} [{i+1}] {title} — {p.url}")
+    return {"ok": True, "result": "\n".join(lines)}
+
+
+async def act_new_tab(_cmd: dict) -> dict:
+    global current_idx
+    if context is None or context.is_closed():
+        await launch_context()
+    p = await context.new_page()
+    pages.append(p)
+    current_idx = len(pages) - 1
+    return {"ok": True, "result": f"Nueva pestaña #{current_idx + 1}"}
+
+
+async def act_close_tab(_cmd: dict) -> dict:
+    global current_idx
+    if not pages:
+        return {"ok": False, "error": "Sin pestañas"}
+    page = pages.pop(current_idx)
+    await page.close()
+    if current_idx >= len(pages):
+        current_idx = max(0, len(pages) - 1)
+    return {"ok": True, "result": f"Pestaña cerrada. Pestañas restantes: {len(pages)}"}
+
+
+async def act_switch_tab(cmd: dict) -> dict:
+    global current_idx
+    idx = int(cmd.get("index", 1)) - 1
+    if 0 <= idx < len(pages):
+        current_idx = idx
+        return {"ok": True, "result": f"Cambiado a pestaña #{idx + 1}"}
+    return {"ok": False, "error": f"Índice fuera de rango (1-{len(pages)})"}
+
+
+async def act_wait(cmd: dict) -> dict:
+    ms = int(cmd.get("ms", 1000))
+    await asyncio.sleep(ms / 1000)
+    return {"ok": True, "result": f"Esperados {ms}ms"}
+
+
+async def act_eval(cmd: dict) -> dict:
+    page = await ensure_page()
+    code = cmd.get("code", "")
+    try:
+        result = await page.evaluate(code)
+        return {"ok": True, "result": str(result)[:EXTRACT_MAX]}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+async def act_stop(_cmd: dict) -> dict:
+    asyncio.get_event_loop().call_soon(lambda: asyncio.get_event_loop().stop())
+    return {"ok": True, "result": "Deteniendo daemon"}
+
+
+HANDLERS = {
+    "navigate":   act_navigate,
+    "click":      act_click,
+    "type":       act_type,
+    "fill":       act_fill,
+    "key":        act_key,
+    "extract":    act_extract,
+    "screenshot": act_screenshot,
+    "scroll":     act_scroll,
+    "status":     act_status,
+    "tabs":       act_tabs,
+    "new_tab":    act_new_tab,
+    "close_tab":  act_close_tab,
+    "switch_tab": act_switch_tab,
+    "wait":       act_wait,
+    "eval":       act_eval,
+    "stop":       act_stop,
+}
+
+
+async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
+    try:
+        data = await reader.readline()
+        cmd = json.loads(data.decode())
+        action = cmd.get("action", "")
+        handler = HANDLERS.get(action)
+        if handler:
+            result = await handler(cmd)
+        else:
+            result = {"ok": False, "error": f"Acción desconocida: '{action}'"}
+    except Exception as e:
+        result = {"ok": False, "error": str(e)}
+    finally:
+        try:
+            writer.write(json.dumps(result).encode() + b"\n")
+            await writer.drain()
+            writer.close()
+        except (ConnectionResetError, BrokenPipeError):
+            pass
+
+
+async def main():
+    PROFILE_DIR.mkdir(parents=True, exist_ok=True)
+    SOCKET_PATH.unlink(missing_ok=True)
+    PID_FILE.write_text(str(os.getpid()))
+    pathlib.Path("/tmp/crowia/browser_type.txt").write_text(BROWSER_TYPE)
+
+    await launch_context()
+
+    server = await asyncio.start_unix_server(handle_client, str(SOCKET_PATH))
+    log.info("Socket listo: %s", SOCKET_PATH)
+
+    loop = asyncio.get_event_loop()
+
+    def _shutdown(sig, _frame):
+        log.info("Señal %s — cerrando", sig)
+        server.close()
+        loop.stop()
+
+    signal.signal(signal.SIGTERM, _shutdown)
+    signal.signal(signal.SIGINT, _shutdown)
+
+    async with server:
+        await server.serve_forever()
+
+    if pw_instance is not None:
+        await pw_instance.stop()
+
+
+if __name__ == "__main__":
+    pathlib.Path("/tmp/crowia").mkdir(parents=True, exist_ok=True)
+    PID_FILE.write_text(str(os.getpid()))
+    try:
+        asyncio.run(main())
+    finally:
+        SOCKET_PATH.unlink(missing_ok=True)
+        PID_FILE.unlink(missing_ok=True)

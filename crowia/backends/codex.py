@@ -4,6 +4,7 @@ import pathlib
 import shutil
 import subprocess
 import tempfile
+import threading
 
 from .base import Backend
 
@@ -16,9 +17,16 @@ class CodexBackend(Backend):
     def __init__(self, cfg: dict):
         self._binary = shutil.which("codex") or "codex"
         self._model = cfg.get("codex", {}).get("model", "")
+        self._proc: subprocess.Popen | None = None
+        self._lock = threading.Lock()
+
+    def cancel(self) -> None:
+        with self._lock:
+            if self._proc and self._proc.poll() is None:
+                self._proc.kill()
 
     def ask(self, text, system_prompt, history=None, image_path=None, file_paths=None, timeout=120):
-        full_text = ""
+        full_text = f"[INSTRUCCIONES DEL SISTEMA]\n{system_prompt}\n[FIN INSTRUCCIONES]\n\n" if system_prompt else ""
         if history:
             lines = []
             for msg in history[-6:]:
@@ -45,17 +53,25 @@ class CodexBackend(Backend):
         env = os.environ.copy()
 
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=env)
+            with self._lock:
+                self._proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
+            stdout, stderr = self._proc.communicate(timeout=timeout)
+            rc = self._proc.returncode
+            with self._lock:
+                self._proc = None
+            if rc == -9:
+                return ""
             if out_file.exists():
                 response = out_file.read_text(encoding="utf-8").strip()
                 out_file.unlink(missing_ok=True)
                 log.info("Codex response (%d chars): %s", len(response), response[:200])
                 return response
-            if result.returncode != 0:
-                log.error("Codex error (rc=%d): %s", result.returncode, result.stderr[:300])
-                return f"[crowia] Error de Codex (rc={result.returncode})"
-            return result.stdout.strip()
+            if rc != 0:
+                log.error("Codex error (rc=%d): %s", rc, stderr[:300])
+                return f"[crowia] Error de Codex (rc={rc})"
+            return stdout.strip()
         except subprocess.TimeoutExpired:
+            self.cancel()
             return f"[crowia] Codex tardó demasiado ({timeout}s)."
         except FileNotFoundError:
             return "[crowia] codex CLI no encontrado. Instala con: npm i -g @openai/codex"

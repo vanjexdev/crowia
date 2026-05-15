@@ -9,6 +9,7 @@ from .backends.base import Backend
 from .backends.claude_cli import ClaudeCliBackend
 from .backends.codex import CodexBackend
 from .backends.opencode import OpenCodeBackend
+from . import skills as skills_mod
 
 log = logging.getLogger(__name__)
 
@@ -22,7 +23,10 @@ BACKENDS = {
 class Assistant:
     def __init__(self, cfg: dict):
         self._cfg = cfg
-        self.system_prompt = cfg["claude"]["system_prompt"]
+        self._base_prompt = cfg["claude"]["system_prompt"]
+        self._enabled_skills: list[str] = list(cfg.get("skills", {}).get("enabled", []))
+        self._available_skills: list[str] = skills_mod.available(cfg)
+        self.system_prompt = self._build_prompt()
         self.timeout = cfg["claude"]["timeout_seconds"]
         self._cfg_api_key = cfg["claude"].get("api_key", "")
         self._api_client: anthropic.Anthropic | None = None
@@ -38,6 +42,50 @@ class Assistant:
             log.warning("Backend '%s' desconocido, usando claude.", name)
             cls = ClaudeCliBackend
         return cls(self._cfg)
+
+    def _build_prompt(self) -> str:
+        skill_text = skills_mod.load_list(self._cfg, self._enabled_skills)
+        return f"{self._base_prompt}\n\n{skill_text}" if skill_text else self._base_prompt
+
+    def _find_skill(self, name: str) -> str | None:
+        name_low = name.lower()
+        for s in self._available_skills:
+            if s.lower() == name_low:
+                return s
+        for s in self._available_skills:
+            if name_low in s.lower() or s.lower() in name_low:
+                return s
+        return None
+
+    def enable_skill(self, name: str) -> str:
+        match = self._find_skill(name)
+        if not match:
+            return f"Skill '{name}' no encontrada. Disponibles: {', '.join(self._available_skills)}"
+        if match in self._enabled_skills:
+            return f"Skill '{match}' ya estaba activa."
+        self._enabled_skills.append(match)
+        self.system_prompt = self._build_prompt()
+        log.info("Skill activada: %s", match)
+        return f"Skill '{match}' activada."
+
+    def disable_skill(self, name: str) -> str:
+        match = self._find_skill(name)
+        if not match:
+            return f"Skill '{name}' no encontrada. Disponibles: {', '.join(self._available_skills)}"
+        if match not in self._enabled_skills:
+            return f"Skill '{match}' ya estaba desactivada."
+        self._enabled_skills.remove(match)
+        self.system_prompt = self._build_prompt()
+        log.info("Skill desactivada: %s", match)
+        return f"Skill '{match}' desactivada."
+
+    def list_skills(self) -> str:
+        enabled = ", ".join(self._enabled_skills) or "ninguna"
+        disabled = ", ".join(s for s in self._available_skills if s not in self._enabled_skills) or "ninguna"
+        return f"Skills activas: {enabled}. Desactivadas: {disabled}."
+
+    def cancel(self) -> None:
+        self._backend.cancel()
 
     def switch_backend(self, name: str) -> str:
         name = name.lower().strip()

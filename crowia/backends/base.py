@@ -5,6 +5,9 @@ from abc import ABC, abstractmethod
 class Backend(ABC):
     name: str = "unknown"
 
+    def cancel(self) -> None:
+        """Cancel in-flight request. No-op by default."""
+
     @abstractmethod
     def ask(
         self,

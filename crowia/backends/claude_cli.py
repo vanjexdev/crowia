@@ -3,6 +3,7 @@ import os
 import pathlib
 import shutil
 import subprocess
+import threading
 
 from .base import Backend
 
@@ -16,9 +17,17 @@ class ClaudeCliBackend(Backend):
         self._binary = cfg["claude"]["binary"] or shutil.which("claude") or ""
         self._model = cfg["claude"].get("model", "claude-haiku-4-5")
         tools = cfg["claude"].get("allowed_tools",
-            "WebSearch Bash(git *) Bash(zeditor*) Bash(alacritty*) Bash(firefox*) Bash(giselo-ask*) Bash(giselo-askpass*) Bash(giselo-pick*) Read Edit Write")
+            "WebSearch Bash(git *) Bash(zeditor*) Bash(alacritty*) Bash(giselo-ask*) Bash(giselo-askpass*) Bash(giselo-pick*) Bash(giselo-browser*) Bash(giselo-google*) Bash(giselo-remind*) Read Edit Write")
         self._allowed_tools = tools
         self._disallowed_tools = cfg["claude"].get("disallowed_tools", "Bash(git push*)")
+        self._proc: subprocess.Popen | None = None
+        self._lock = threading.Lock()
+
+    def cancel(self) -> None:
+        with self._lock:
+            if self._proc and self._proc.poll() is None:
+                self._proc.kill()
+                log.info("Claude CLI process killed by cancel()")
 
     def ask(self, text, system_prompt, history=None, image_path=None, file_paths=None, timeout=120):
         full_text = ""
@@ -63,18 +72,34 @@ class ClaudeCliBackend(Backend):
         env.setdefault("DBUS_SESSION_BUS_ADDRESS", f"unix:path=/run/user/{uid}/bus")
         env["SUDO_ASKPASS"] = str(pathlib.Path.home() / ".local/bin/giselo-askpass")
 
+        log.debug("Launching claude CLI (prompt_len=%d, sysprompt_len=%d)",
+                  len(full_text), len(system_prompt))
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=env)
+            with self._lock:
+                self._proc = subprocess.Popen(
+                    cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                    text=True, env=env,
+                )
+            log.debug("Claude CLI started (pid=%d), waiting...", self._proc.pid)
+            stdout, stderr = self._proc.communicate(timeout=timeout)
+            log.debug("Claude CLI finished (rc=%d, stdout_len=%d)", self._proc.returncode, len(stdout))
+            rc = self._proc.returncode
         except subprocess.TimeoutExpired:
+            self.cancel()
             return f"[crowia] Claude tardó demasiado ({timeout}s)."
         except FileNotFoundError:
-            return f"[crowia] claude CLI no encontrado."
+            return "[crowia] claude CLI no encontrado."
+        finally:
+            with self._lock:
+                self._proc = None
 
-        if result.returncode != 0:
-            log.error("CLI error (rc=%d) stderr: %s | stdout: %s",
-                      result.returncode, result.stderr[:300], result.stdout[:300])
-            return f"[crowia] Error del CLI (rc={result.returncode})"
+        if rc not in (0, -9):  # -9 = killed by cancel
+            log.error("CLI error (rc=%d) stderr: %s | stdout: %s", rc, stderr[:300], stdout[:300])
+            return f"[crowia] Error del CLI (rc={rc})"
 
-        response = result.stdout.strip()
+        if rc == -9:
+            return ""
+
+        response = stdout.strip()
         log.info("Claude response (%d chars): %s", len(response), response[:200])
         return response

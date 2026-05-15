@@ -1,15 +1,14 @@
+import json
 import logging
 import os
 import pathlib
-import re
 import shutil
 import subprocess
+import threading
 
 from .base import Backend
 
 log = logging.getLogger(__name__)
-
-_ANSI = re.compile(r'\x1b\[[0-9;]*m')
 
 
 class OpenCodeBackend(Backend):
@@ -18,9 +17,16 @@ class OpenCodeBackend(Backend):
     def __init__(self, cfg: dict):
         self._binary = shutil.which("opencode") or "opencode"
         self._model = cfg.get("opencode", {}).get("model", "opencode/big-pickle")
+        self._proc: subprocess.Popen | None = None
+        self._lock = threading.Lock()
+
+    def cancel(self) -> None:
+        with self._lock:
+            if self._proc and self._proc.poll() is None:
+                self._proc.kill()
 
     def ask(self, text, system_prompt, history=None, image_path=None, file_paths=None, timeout=120):
-        full_text = ""
+        full_text = f"[INSTRUCCIONES DEL SISTEMA]\n{system_prompt}\n[FIN INSTRUCCIONES]\n\n" if system_prompt else ""
         if history:
             lines = []
             for msg in history[-6:]:
@@ -42,6 +48,7 @@ class OpenCodeBackend(Backend):
         cmd = [
             self._binary, "run",
             "--model", self._model,
+            "--format", "json",
             "--dangerously-skip-permissions",
             full_text,
         ]
@@ -49,28 +56,43 @@ class OpenCodeBackend(Backend):
         env = os.environ.copy()
 
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=env)
+            with self._lock:
+                self._proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
+            stdout, stderr = self._proc.communicate(timeout=timeout)
+            rc = self._proc.returncode
+            with self._lock:
+                self._proc = None
         except subprocess.TimeoutExpired:
+            self.cancel()
             return f"[crowia] OpenCode tardó demasiado ({timeout}s)."
         except FileNotFoundError:
             return "[crowia] opencode no encontrado."
 
-        if result.returncode != 0:
-            log.error("OpenCode error (rc=%d): %s", result.returncode, result.stderr[:300])
-            return f"[crowia] Error de OpenCode (rc={result.returncode})"
+        if rc == -9:
+            return ""
+        if rc != 0:
+            log.error("OpenCode error (rc=%d): %s", rc, stderr[:300])
+            return f"[crowia] Error de OpenCode (rc={rc})"
 
-        # Strip ANSI and header lines ("> build · model")
-        response = self._clean_output(result.stdout)
+        response = self._parse_json_output(stdout)
+        if not response:
+            log.error("OpenCode empty response. stderr: %s", stderr[:300])
+            return "[crowia] OpenCode no devolvió respuesta."
         log.info("OpenCode response (%d chars): %s", len(response), response[:200])
         return response
 
-    def _clean_output(self, output: str) -> str:
-        lines = []
+    def _parse_json_output(self, output: str) -> str:
+        parts = []
         for line in output.splitlines():
-            clean = _ANSI.sub("", line).strip()
-            if not clean:
+            line = line.strip()
+            if not line:
                 continue
-            if clean.startswith(">"):  # header line "> build · model"
+            try:
+                event = json.loads(line)
+                if event.get("type") == "text":
+                    text = event.get("part", {}).get("text", "")
+                    if text:
+                        parts.append(text)
+            except json.JSONDecodeError:
                 continue
-            lines.append(clean)
-        return "\n".join(lines).strip() or "[crowia] OpenCode no devolvió respuesta."
+        return "".join(parts).strip()

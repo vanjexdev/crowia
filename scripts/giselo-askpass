@@ -1,60 +1,34 @@
 #!/home/jesusu/Workspace/agents/crowia/.venv/bin/python3
 """
 giselo-askpass
-SUDO_ASKPASS helper: muestra diálogo de contraseña, devuelve a stdout.
-Uso: sudo -A comando  (con SUDO_ASKPASS apuntando a este script)
+SUDO_ASKPASS helper usando kdialog (nativo KDE). Imprime contraseña a stdout.
 """
 import os
+import shutil
+import subprocess
 import sys
 
-os.environ.setdefault("WAYLAND_DISPLAY", "wayland-0")
-os.environ.setdefault("DISPLAY", ":0")
 uid = os.getuid()
-os.environ.setdefault("XDG_RUNTIME_DIR", f"/run/user/{uid}")
-os.environ.setdefault("DBUS_SESSION_BUS_ADDRESS", f"unix:path=/run/user/{uid}/bus")
-
-from PyQt6.QtWidgets import QApplication, QDialog, QVBoxLayout, QLabel, QLineEdit, QDialogButtonBox
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QFont
+env = os.environ.copy()
+env.setdefault("WAYLAND_DISPLAY", "wayland-0")
+env.setdefault("DISPLAY", ":0")
+env.setdefault("XDG_RUNTIME_DIR", f"/run/user/{uid}")
+env.setdefault("DBUS_SESSION_BUS_ADDRESS", f"unix:path=/run/user/{uid}/bus")
 
 prompt = " ".join(sys.argv[1:]) if len(sys.argv) > 1 else "Contraseña sudo:"
 
-app = QApplication(sys.argv)
-
-dialog = QDialog()
-dialog.setWindowTitle("Giselo — Autenticación requerida")
-dialog.setWindowFlags(
-    Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.Dialog
-)
-dialog.setMinimumWidth(420)
-
-layout = QVBoxLayout(dialog)
-layout.setSpacing(12)
-layout.setContentsMargins(20, 20, 20, 20)
-
-label = QLabel(prompt)
-label.setWordWrap(True)
-label.setFont(QFont("Sans", 11))
-layout.addWidget(label)
-
-field = QLineEdit()
-field.setEchoMode(QLineEdit.EchoMode.Password)
-field.setFont(QFont("Monospace", 10))
-field.setMinimumHeight(36)
-layout.addWidget(field)
-
-buttons = QDialogButtonBox(
-    QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
-)
-buttons.accepted.connect(dialog.accept)
-buttons.rejected.connect(dialog.reject)
-layout.addWidget(buttons)
-
-field.setFocus()
-field.returnPressed.connect(dialog.accept)
-
-if dialog.exec() == QDialog.DialogCode.Accepted:
-    print(field.text(), end="")
-    sys.exit(0)
-else:
+if not shutil.which("kdialog"):
+    print("Error: kdialog no encontrado.", file=sys.stderr)
     sys.exit(1)
+
+result = subprocess.run(
+    ["kdialog", "--title", "Giselo — Autenticación requerida", "--password", prompt],
+    capture_output=True, text=True, env=env,
+)
+text = result.stdout.strip()
+if result.returncode == 0 and text is not None:
+    sys.stdout.write(text)
+    sys.stdout.flush()
+    sys.exit(0)
+
+sys.exit(1)
