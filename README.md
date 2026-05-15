@@ -96,6 +96,47 @@ curl -L -o ~/.local/share/piper/es_ES-davefx-medium.onnx.json \
 sudo usermod -aG input $USER
 ```
 
+## giselo-doctor
+
+Detecta el sistema operativo y genera `config.local.yaml` con comandos ajustados automáticamente. Ejecutar una vez después de instalar, o al cambiar de máquina/OS.
+
+```bash
+./scripts/giselo-doctor
+```
+
+Qué hace:
+
+- Verifica dependencias (Python, PyQt6, faster-whisper, Claude CLI, arecord, piper-tts, notify-send, evdev, kdialog, playerctl, playwright)
+- Imprime ✓/✗ por componente con hint de instalación si falta algo
+- Escribe `config.local.yaml` con la ruta correcta de `piper-tts`, backend de audio, picker, etc.
+
+`config.local.yaml` se fusiona automáticamente sobre `config.yaml` al arrancar. No hace falta editar `config.yaml` a mano para ajustes de OS.
+
+Ejemplo de salida:
+
+```
+╔══════════════════════════════════════╗
+║        giselo-doctor  v1.0           ║
+╚══════════════════════════════════════╝
+
+  Sistema: CachyOS Linux
+  Familia: arch  |  Pkg: paru
+
+  Python y dependencias core
+    ✓ Python  3.14.4
+    ✓ PyYAML  6.0.3
+    ✓ PyQt6  6.11.0
+    ✗ faster-whisper
+    ✓ Claude CLI  2.1.142
+
+  ...
+
+  ✓ Escrito: /ruta/al/proyecto/config.local.yaml
+  ✓ Todo listo para correr Giselo en CachyOS Linux
+```
+
+Sistemas soportados: Arch/CachyOS/Manjaro, Ubuntu/Debian, Fedora, openSUSE, macOS, Windows.
+
 ## Configuración
 
 Todo en `config.yaml`. Claves importantes:
@@ -187,8 +228,11 @@ systemctl --user enable --now crowia
 crowia/
 ├── crowia.py           # Entry point, pipeline principal
 ├── config.yaml         # Configuración
+├── config.local.yaml   # Generado por giselo-doctor (no committear)
 ├── crowia.service      # Servicio systemd
 ├── setup.sh            # Script de instalación
+├── scripts/
+│   └── giselo-doctor   # Diagnóstico de OS y generación de config.local.yaml
 └── crowia/
     ├── config.py       # Carga y merge de configuración
     ├── hotkey.py       # Listener de teclado (evdev, async)
