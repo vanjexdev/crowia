@@ -15,6 +15,8 @@ def main():
     parser.add_argument("--port", type=int, default=8080, help="Port (default: 8080)")
     parser.add_argument("--config", default=str(PROJECT_ROOT / "config.yaml"))
     parser.add_argument("--debug", action="store_true")
+    parser.add_argument("--ssl-cert", help="Path to TLS certificate (.crt)")
+    parser.add_argument("--ssl-key", help="Path to TLS private key (.key)")
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -29,17 +31,23 @@ def main():
         print("  pip install uvicorn fastapi")
         sys.exit(1)
 
-    print(f"\n  Giselo Web arrancando en http://{args.host}:{args.port}")
-    print(f"  Acceso local:    http://localhost:{args.port}")
-    print(f"  Acceso VPN:      http://<tailscale-ip>:{args.port}\n")
+    https = args.ssl_cert and args.ssl_key
+    proto = "https" if https else "http"
+    print(f"\n  Giselo Web arrancando en {proto}://{args.host}:{args.port}")
+    print(f"  Acceso local:    {proto}://localhost:{args.port}")
+    print(f"  Acceso VPN:      {proto}://<tailscale-hostname>:{args.port}\n")
 
-    uvicorn.run(
-        "crowia.server.app:app",
+    uvicorn_kwargs = dict(
         host=args.host,
         port=args.port,
         reload=args.debug,
         log_level="debug" if args.debug else "info",
     )
+    if https:
+        uvicorn_kwargs["ssl_certfile"] = args.ssl_cert
+        uvicorn_kwargs["ssl_keyfile"] = args.ssl_key
+
+    uvicorn.run("crowia.server.app:app", **uvicorn_kwargs)
 
 
 if __name__ == "__main__":
