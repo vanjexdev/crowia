@@ -11,7 +11,7 @@ try:
 except ImportError:
     _MD_AVAILABLE = False
 
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QObject
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal, pyqtSlot, QObject
 from PyQt6.QtGui import QPixmap, QPainter, QColor, QFont
 from PyQt6.QtWidgets import (
     QApplication, QCheckBox, QDialog, QDialogButtonBox,
@@ -164,7 +164,7 @@ class TextInputPanel(QWidget):
         super().__init__(parent)
         self._files: list[pathlib.Path] = []
         self._pending_file_path: str | None = None
-        self._file_ready.connect(lambda p: self._add_chip(pathlib.Path(p)))
+        self._file_ready.connect(self._on_file_ready)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -216,6 +216,10 @@ class TextInputPanel(QWidget):
         menu.addAction("📁 Carpeta", lambda: self._launch_picker(folder=True))
         menu.exec(self._edit.mapToGlobal(self._edit.rect().bottomLeft()))
 
+    @pyqtSlot(str)
+    def _on_file_ready(self, path_str: str):
+        self._add_chip(pathlib.Path(path_str))
+
     def _launch_picker(self, folder: bool):
         def _run():
             picker = shutil.which("giselo-pick") or str(_SCRIPTS_DIR / "giselo-pick")
@@ -224,23 +228,26 @@ class TextInputPanel(QWidget):
                 result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
                 path = result.stdout.strip()
                 if result.returncode == 0 and path:
-                    log.debug("Picker returned: %s", path)
+                    log.info("Picker returned: %s", path)
                     self._file_ready.emit(path)
                 else:
-                    log.debug("Picker cancelled or empty (rc=%d)", result.returncode)
+                    log.info("Picker cancelled or empty (rc=%d)", result.returncode)
             except Exception as e:
                 log.error("File picker failed: %s", e)
         threading.Thread(target=_run, daemon=True).start()
 
     def _add_chip(self, path: pathlib.Path):
+        log.info("Adding chip: %s (files so far: %d)", path, len(self._files))
         if path in self._files:
             return
         self._files.append(path)
         btn = QPushButton(f"📎 {path.name} ✕")
         btn.setStyleSheet(_CHIP_STYLE)
+        btn.setParent(self)
         btn.clicked.connect(lambda checked=False, p=path, b=btn: self._remove_chip(p, b))
-        # Insert before the trailing stretch (last item)
         self._chips_row.insertWidget(self._chips_row.count() - 1, btn)
+        btn.show()
+        log.info("Chip added, chips_row count: %d", self._chips_row.count())
 
     def _remove_chip(self, path: pathlib.Path, btn: QPushButton):
         if path in self._files:
