@@ -81,8 +81,9 @@ _TTS_MUTE_KW = [
     "apaga el audio", "apaga la voz",
 ]
 _TTS_UNMUTE_KW = [
-    "activa el audio", "activa la voz", "habla", "con audio",
+    "activa el audio", "activa la voz",
     "activa las respuestas de voz", "pon el audio", "pon la voz",
+    "vuelve a hablar", "habla de nuevo", "quiero escucharte",
 ]
 
 _SKILL_DISABLE_RE = re.compile(
