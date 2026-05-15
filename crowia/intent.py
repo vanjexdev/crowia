@@ -71,6 +71,16 @@ _MEDIA_PREV_KW = [
     "vuelve a la anterior", "previous", "prev",
 ]
 
+_TTS_MUTE_KW = [
+    "silencia las respuestas", "desactiva el audio", "desactiva la voz",
+    "silencia la voz", "sin audio", "modo silencioso", "no hables",
+    "apaga el audio", "apaga la voz",
+]
+_TTS_UNMUTE_KW = [
+    "activa el audio", "activa la voz", "habla", "con audio",
+    "activa las respuestas de voz", "pon el audio", "pon la voz",
+]
+
 _SKILL_DISABLE_RE = re.compile(
     r'(?:desactiva|deshabilita|apaga|quita|desactiva)\s+(?:la\s+)?skill\s+([\w-]+)',
     re.IGNORECASE,
@@ -99,6 +109,8 @@ class Intents:
         self.skill_enable: str | None = None
         self.skill_disable: str | None = None
         self.skill_list: bool = False
+        self.tts_mute: bool = False
+        self.tts_unmute: bool = False
 
 
 def detect(text: str) -> Intents:
@@ -138,6 +150,11 @@ def detect(text: str) -> Intents:
         result.media = "next"
     elif any(kw in low for kw in _MEDIA_PREV_KW):
         result.media = "prev"
+
+    if any(kw in low for kw in _TTS_MUTE_KW):
+        result.tts_mute = True
+    elif any(kw in low for kw in _TTS_UNMUTE_KW):
+        result.tts_unmute = True
 
     m = _SKILL_DISABLE_RE.search(low)
     if m:

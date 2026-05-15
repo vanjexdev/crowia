@@ -5,6 +5,7 @@ PREFS_PATH = pathlib.Path.home() / ".config/crowia/prefs.json"
 
 DEFAULTS: dict = {
     "show_response_text": True,
+    "tts_enabled": True,
 }
 
 

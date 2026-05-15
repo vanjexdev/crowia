@@ -64,6 +64,14 @@ def main():
                 print(f"[!!] {path}  [PERMISSION DENIED]")
         return
 
+    cfg = load_config(args.config)
+    log = logging.getLogger("crowia")
+
+    if args.backend:
+        cfg["backend"] = args.backend
+    if args.hotkey:
+        cfg["hotkey"]["keys"] = [k.strip() for k in args.hotkey.split(",")]
+
     # Qt must be initialized before anything else that touches the display
     overlay = None
     qt_app = None
@@ -72,19 +80,11 @@ def main():
             from PyQt6.QtWidgets import QApplication
             from crowia.ui import CrowiaOverlay
             qt_app = QApplication(sys.argv)
-            overlay = CrowiaOverlay()
+            overlay = CrowiaOverlay(cfg=cfg)
             overlay.show()
         except Exception as e:
             logging.getLogger("crowia").warning("UI unavailable: %s", e)
             overlay = None
-
-    cfg = load_config(args.config)
-    log = logging.getLogger("crowia")
-
-    if args.backend:
-        cfg["backend"] = args.backend
-    if args.hotkey:
-        cfg["hotkey"]["keys"] = [k.strip() for k in args.hotkey.split(",")]
 
     recorder = Recorder(cfg)
     transcriber = Transcriber(cfg)
@@ -96,10 +96,12 @@ def main():
         if overlay:
             overlay.notify("idle")
 
+    output = OutputHandler(cfg)
+
     if overlay:
         overlay._on_cancel = on_cancel
         overlay.set_backend(assistant.current_backend_name)
-    output = OutputHandler(cfg)
+        overlay.tts_toggled.connect(output.set_tts)
 
     history_cfg = cfg.get("history", {})
     history = ConversationHistory(
@@ -114,13 +116,117 @@ def main():
         if overlay:
             overlay.notify(state)
 
+    def _handle_intents(intents, text: str) -> bool:
+        """Handle quick intents. Returns True if handled (skip LLM)."""
+        if intents.switch_backend:
+            msg = assistant.switch_backend(intents.switch_backend)
+            if overlay:
+                overlay.set_backend(assistant.current_backend_name)
+            output.show("Giselo", msg)
+            ui("done")
+            return True
+        if intents.tts_mute:
+            output.set_tts(False)
+            if overlay:
+                overlay.set_tts_state(False)
+            output.show("Giselo", "Audio desactivado.")
+            ui("done")
+            return True
+        if intents.tts_unmute:
+            output.set_tts(True)
+            if overlay:
+                overlay.set_tts_state(True)
+            output.show("Giselo", "Audio activado.")
+            ui("done")
+            return True
+        if intents.skill_disable:
+            output.show("Giselo", assistant.disable_skill(intents.skill_disable))
+            ui("done")
+            return True
+        if intents.skill_enable:
+            output.show("Giselo", assistant.enable_skill(intents.skill_enable))
+            ui("done")
+            return True
+        if intents.skill_list:
+            output.show("Giselo", assistant.list_skills())
+            ui("done")
+            return True
+        if intents.clear_history:
+            history.clear()
+            output.show("Crowia", "Historial borrado.")
+            ui("done")
+            return True
+        if intents.media is not None:
+            output.show("Media", system_control.control_media(intents.media))
+            ui("done")
+            return True
+        if intents.volume is not None and not intents.screenshot and not intents.files:
+            output.show("Sistema", system_control.control_volume(intents.volume))
+            ui("done")
+            return True
+        return False
+
+    def _run_text_pipeline(text: str, extra_files: list[pathlib.Path] | None = None):
+        """Shared pipeline for voice transcription and typed text input."""
+        ui("processing")
+        log.info("Text pipeline: %s", text)
+        intents = intent.detect(text)
+
+        if _handle_intents(intents, text):
+            return
+
+        screenshot_path = None
+        if intents.screenshot:
+            output.show_status("Capturando pantalla…")
+            screenshot_path = screen.take_screenshot()
+
+        file_paths = list(intents.files or [])
+        if extra_files:
+            file_paths.extend(extra_files)
+
+        output.show_status(f"Preguntando a {assistant.current_backend_name}: {text[:50]}…")
+        try:
+            response = assistant.ask(
+                text=text,
+                history=history.get_messages(),
+                image_path=screenshot_path,
+                file_paths=file_paths or None,
+            )
+        except Exception as e:
+            log.error("Assistant error: %s", e)
+            output.show_status(f"Error: {e}")
+            ui("idle")
+            return
+        finally:
+            if screenshot_path and screenshot_path.exists():
+                screenshot_path.unlink(missing_ok=True)
+
+        if intents.volume is not None:
+            system_control.control_volume(intents.volume)
+
+        history.add("user", text)
+        history.add("assistant", response)
+        output.show(text, response)
+        if overlay:
+            overlay.set_response(response)
+        ui("done")
+
+    def _on_text_submitted(text: str, file_strs: list):
+        files = [pathlib.Path(p) for p in file_strs]
+        threading.Thread(
+            target=lambda: (pipeline_lock.acquire(), _run_text_pipeline(text, files), pipeline_lock.release()),
+            daemon=True,
+        ).start()
+
+    if overlay:
+        overlay.text_submitted.connect(_on_text_submitted)
+
     def run_pipeline():
         wav = recorder.wav_path
         if wav is None or not wav.exists():
             log.warning("No WAV file after recording")
             return
 
-        ui("processing")
         output.show_status("Transcribiendo…")
         try:
             text = transcriber.transcribe(wav)
@@ -137,88 +243,7 @@ def main():
             ui("idle")
             return
 
-        log.info("Transcribed: %s", text)
-        log.debug("Detecting intents...")
-        intents = intent.detect(text)
-        log.debug("Intents: screenshot=%s volume=%s media=%s files=%s backend=%s",
-                  intents.screenshot, intents.volume, intents.media, intents.files, intents.switch_backend)
-
-        if intents.switch_backend:
-            msg = assistant.switch_backend(intents.switch_backend)
-            if overlay:
-                overlay.set_backend(assistant.current_backend_name)
-            output.show("Giselo", msg)
-            ui("done")
-            return
-
-        if intents.skill_disable:
-            msg = assistant.disable_skill(intents.skill_disable)
-            output.show("Giselo", msg)
-            ui("done")
-            return
-
-        if intents.skill_enable:
-            msg = assistant.enable_skill(intents.skill_enable)
-            output.show("Giselo", msg)
-            ui("done")
-            return
-
-        if intents.skill_list:
-            output.show("Giselo", assistant.list_skills())
-            ui("done")
-            return
-
-        if intents.clear_history:
-            history.clear()
-            output.show("Crowia", "Historial borrado.")
-            ui("done")
-            return
-
-        if intents.media is not None:
-            result = system_control.control_media(intents.media)
-            output.show("Media", result)
-            ui("done")
-            return
-
-        if intents.volume is not None and not intents.screenshot and not intents.files:
-            result = system_control.control_volume(intents.volume)
-            output.show("Control de sistema", result)
-            ui("done")
-            return
-
-        screenshot_path: pathlib.Path | None = None
-        if intents.screenshot:
-            output.show_status("Capturando pantalla…")
-            screenshot_path = screen.take_screenshot()
-
-        log.debug("Calling assistant.ask (backend=%s)...", assistant.current_backend_name)
-        output.show_status(f"Preguntando a Claude: {text[:50]}…")
-
-        try:
-            response = assistant.ask(
-                text=text,
-                history=history.get_messages(),
-                image_path=screenshot_path,
-                file_paths=intents.files if intents.files else None,
-            )
-        except Exception as e:
-            log.error("Claude error: %s", e)
-            output.show_status(f"Error de Claude: {e}")
-            ui("idle")
-            return
-        finally:
-            if screenshot_path and screenshot_path.exists():
-                screenshot_path.unlink(missing_ok=True)
-
-        if intents.volume is not None:
-            system_control.control_volume(intents.volume)
-
-        history.add("user", text)
-        history.add("assistant", response)
-        output.show(text, response)
-        if overlay:
-            overlay.set_response(response)
-        ui("done")
+        _run_text_pipeline(text)
 
     def on_start():
         nonlocal safety_timer
@@ -284,82 +309,7 @@ def main():
                 return
 
             log.info("Transcribed: %s", text)
-            intents = intent.detect(text)
-
-            if intents.switch_backend:
-                msg = assistant.switch_backend(intents.switch_backend)
-                if overlay:
-                    overlay.set_backend(assistant.current_backend_name)
-                output.show("Giselo", msg)
-                ui("done")
-                return
-
-            if intents.skill_disable:
-                msg = assistant.disable_skill(intents.skill_disable)
-                output.show("Giselo", msg)
-                ui("done")
-                return
-
-            if intents.skill_enable:
-                msg = assistant.enable_skill(intents.skill_enable)
-                output.show("Giselo", msg)
-                ui("done")
-                return
-
-            if intents.skill_list:
-                output.show("Giselo", assistant.list_skills())
-                ui("done")
-                return
-
-            if intents.clear_history:
-                history.clear()
-                output.show("Crowia", "Historial borrado.")
-                ui("done")
-                return
-
-            if intents.media is not None:
-                result = system_control.control_media(intents.media)
-                output.show("Media", result)
-                ui("done")
-                return
-
-            if intents.volume is not None and not intents.screenshot and not intents.files:
-                result = system_control.control_volume(intents.volume)
-                output.show("Sistema", result)
-                ui("done")
-                return
-
-            screenshot_path = None
-            if intents.screenshot:
-                output.show_status("Capturando pantalla…")
-                screenshot_path = screen.take_screenshot()
-
-            output.show_status(f"Preguntando a Claude: {text[:50]}…")
-            try:
-                response = assistant.ask(
-                    text=text,
-                    history=history.get_messages(),
-                    image_path=screenshot_path,
-                    file_paths=intents.files or None,
-                )
-            except Exception as e:
-                log.error("Claude error: %s", e)
-                output.show_status(f"Error: {e}")
-                ui("idle")
-                return
-            finally:
-                if screenshot_path and screenshot_path.exists():
-                    screenshot_path.unlink(missing_ok=True)
-
-            if intents.volume is not None:
-                system_control.control_volume(intents.volume)
-
-            history.add("user", text)
-            history.add("assistant", response)
-            output.show(text, response)
-            if overlay:
-                overlay.set_response(response)
-            ui("done")
+            _run_text_pipeline(text)
 
         listener = AlwaysOnListener(
             cfg=cfg,
