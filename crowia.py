@@ -75,16 +75,32 @@ def main():
     # Qt must be initialized before anything else that touches the display
     overlay = None
     qt_app = None
+    ui_queue = None
     if not args.no_ui:
         try:
+            import queue
             from PyQt6.QtWidgets import QApplication
+            from PyQt6.QtCore import QTimer
             from crowia.ui import CrowiaOverlay
             qt_app = QApplication(sys.argv)
             overlay = CrowiaOverlay(cfg=cfg)
             overlay.show()
+            ui_queue = queue.Queue()
+            # Process UI queue every 50ms
+            def process_ui_queue():
+                try:
+                    while True:
+                        fn, args, kwargs = ui_queue.get_nowait()
+                        fn(*args, **kwargs)
+                except queue.Empty:
+                    pass
+            timer = QTimer()
+            timer.timeout.connect(process_ui_queue)
+            timer.start(50)
         except Exception as e:
             logging.getLogger("crowia").warning("UI unavailable: %s", e)
             overlay = None
+            ui_queue = None
 
     recorder = Recorder(cfg)
     transcriber = Transcriber(cfg)
@@ -115,7 +131,16 @@ def main():
 
     def ui(state: str):
         if overlay:
-            overlay.notify(state)
+            if ui_queue:
+                ui_queue.put((overlay.notify, (state,), {}))
+            else:
+                overlay.notify(state)
+
+    def thread_safe_show_status(msg: str):
+        if ui_queue:
+            ui_queue.put((output.show_status, (msg,), {}))
+        else:
+            output.show_status(msg)
 
     def _handle_intents(intents, text: str) -> bool:
         """Handle quick intents. Returns True if handled (skip LLM)."""
@@ -254,9 +279,11 @@ def main():
 
     def on_start():
         nonlocal safety_timer
-        if pipeline_lock.locked():
+        if not pipeline_lock.acquire(blocking=False):
             log.warning("Pipeline already running, ignoring start")
             return
+        pipeline_lock.release()  # Just checking availability
+
         log.info("Recording started")
         ui("recording")
         output.show_status("Grabando…")
@@ -322,8 +349,8 @@ def main():
             cfg=cfg,
             on_speech_ready=on_speech_ready,
             transcriber=transcriber,
-            on_wake=lambda: (ui("recording"), output.show_status("Escuchando…")),
-            on_idle=lambda: (ui("idle"), output.show_status(f"Di '{wake_phrases[0]}' para activar")),
+            on_wake=lambda: (ui("recording"), thread_safe_show_status("Escuchando…")),
+            on_idle=lambda: (ui("idle"), thread_safe_show_status(f"Di '{wake_phrases[0]}' para activar")),
         )
         log.info("crowia listo. Modo: always-on | Wake: %s | Whisper: %s",
                  wake_phrases, cfg["whisper"]["model"])
@@ -344,7 +371,9 @@ def main():
             cfg["whisper"]["model"],
             cfg["claude"].get("model", "claude-sonnet-4-6"),
         )
-        t = threading.Thread(target=lambda: asyncio.run(listener.run()), daemon=True)
+        def _run_hotkey_listener():
+            asyncio.run(listener.run())
+        t = threading.Thread(target=_run_hotkey_listener, daemon=True)
         t.start()
 
     if qt_app:
