@@ -121,16 +121,21 @@ async def websocket_endpoint(ws: WebSocket):
         await send({"type": "done", "content": response})
 
         if tts_enabled and tts_cmd:
+            log.info("TTS: generating audio (%d chars)…", len(response))
             await send({"type": "audio_start"})
             try:
                 wav = await loop.run_in_executor(
                     None,
                     lambda: tts_to_wav_bytes(response, tts_cmd),
                 )
+                log.info("TTS: sending %d bytes", len(wav))
                 await send_bytes(wav)
+                log.info("TTS: sent OK")
             except Exception as e:
-                log.warning("TTS failed: %s", e)
+                log.warning("TTS failed: %s", e, exc_info=True)
             await send({"type": "audio_end"})
+        else:
+            log.info("TTS skipped: enabled=%s cmd=%s", tts_enabled, bool(tts_cmd))
 
     try:
         audio_chunks: list[bytes] = []

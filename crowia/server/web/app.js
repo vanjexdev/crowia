@@ -67,10 +67,12 @@ class GiseloApp {
 
   _onMessage(e) {
     if (e.data instanceof ArrayBuffer) {
+      console.log('[audio] received ArrayBuffer', e.data.byteLength, 'bytes, ttsEnabled=', this._ttsEnabled);
       if (this._ttsEnabled) this._player.playWav(e.data.slice(0));
       return;
     }
     const msg = JSON.parse(e.data);
+    console.log('[ws]', msg.type, msg.content?.slice?.(0,40) ?? '');
     switch (msg.type) {
       case 'status':
         this._setStatus('processing', msg.message);
