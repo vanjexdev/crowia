@@ -128,6 +128,7 @@ class GiseloApp {
     const submit = () => {
       const text = input.value.trim();
       if (!text) return;
+      this._player.unlock();
       this._addBubble('user', text);
       this._send({ type: 'text', content: text });
       this._setStatus('processing', `Preguntando a ${this._backend}…`);
@@ -160,6 +161,7 @@ class GiseloApp {
 
     if (!this._recorder.active) {
       try {
+        this._player.unlock();
         await this._recorder.start();
         this._send({ type: 'voice_start' });
         this._setStatus('recording', 'Grabando… (toca para detener)');

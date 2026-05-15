@@ -42,6 +42,12 @@ export class AudioPlayer {
     this._queue = Promise.resolve();
   }
 
+  /** Call once on any user gesture to unblock autoplay policy. */
+  unlock() {
+    if (!this._ctx) this._ctx = new AudioContext();
+    if (this._ctx.state === 'suspended') this._ctx.resume();
+  }
+
   _ctx_get() {
     if (!this._ctx) this._ctx = new AudioContext();
     return this._ctx;
@@ -51,6 +57,7 @@ export class AudioPlayer {
     const ctx = this._ctx_get();
     this._queue = this._queue.then(async () => {
       try {
+        if (ctx.state === 'suspended') await ctx.resume();
         const decoded = await ctx.decodeAudioData(arrayBuffer);
         await new Promise(resolve => {
           const src = ctx.createBufferSource();
