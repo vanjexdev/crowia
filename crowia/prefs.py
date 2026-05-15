@@ -6,11 +6,11 @@ PREFS_PATH = pathlib.Path.home() / ".config/crowia/prefs.json"
 DEFAULTS: dict = {
     "show_response_text": True,
     "tts_enabled": True,
-    "render_markdown": False,
+    "render_markdown": True,
     "layout_mode": "horizontal",   # "horizontal" | "vertical"
     "right_panel_visible": True,
-    "splitter_sizes_h": [380, 340],
-    "splitter_sizes_v": [300, 360],
+    "splitter_sizes_h": [340, 720],
+    "splitter_sizes_v": [340, 600],
 }
 
 

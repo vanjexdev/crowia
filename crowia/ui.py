@@ -461,7 +461,6 @@ class CrowiaOverlay(QWidget):
 
         self.setCursor(Qt.CursorShape.SizeAllCursor)
         self._set_image("idle")
-        self.adjustSize()
         self._move_bottom_right()
 
     # ── public thread-safe API ────────────────────────────────────────────────
@@ -494,11 +493,11 @@ class CrowiaOverlay(QWidget):
         if state == "done":
             QTimer.singleShot(3000, lambda: self._apply_state("idle"))
         self.show()
-        self.adjustSize()
+        self._fit()
 
     def _on_cancel_clicked(self):
         self._cancel_btn.hide()
-        self.adjustSize()
+        self._fit()
         if self._on_cancel:
             threading.Thread(target=self._on_cancel, daemon=True).start()
 
@@ -539,7 +538,7 @@ class CrowiaOverlay(QWidget):
         self._mode_btn.setText("⇔" if new_mode == "horizontal" else "⇕")
         self._update_hide_btn_icon()
         prefs_mod.save(self._prefs)
-        self.adjustSize()
+        self._move_bottom_right()
 
     def _toggle_right_panel(self):
         visible = self._right_widget.isVisible()
@@ -547,7 +546,7 @@ class CrowiaOverlay(QWidget):
         self._prefs["right_panel_visible"] = not visible
         self._update_hide_btn_icon()
         prefs_mod.save(self._prefs)
-        self.adjustSize()
+        self._fit()
 
     def _update_hide_btn_icon(self):
         mode = self._prefs.get("layout_mode", "horizontal")
@@ -577,7 +576,7 @@ class CrowiaOverlay(QWidget):
             self._response_box.setPlainText(text)
         if self._prefs.get("show_response_text", True):
             self._response_box.show()
-            self.adjustSize()
+            self._fit()
 
     def _on_splitter_moved(self, _pos, _index):
         mode = self._prefs.get("layout_mode", "horizontal")
@@ -590,9 +589,24 @@ class CrowiaOverlay(QWidget):
         if px:
             self._crow.setPixmap(px)
 
+    def _preferred_width(self) -> int:
+        mode = self._prefs.get("layout_mode", "horizontal")
+        if mode == "horizontal":
+            sizes = self._prefs.get("splitter_sizes_h", [340, 720])
+            return sizes[0] + (sizes[1] if self._right_widget.isVisible() else 0) + 22
+        sizes = self._prefs.get("splitter_sizes_v", [340, 600])
+        return max(sizes[0], sizes[1] if self._right_widget.isVisible() else sizes[0]) + 22
+
+    def _fit(self):
+        """Resize preserving splitter width; only adjust height."""
+        w = self._splitter.width() + 16
+        if w < 100:
+            w = self._preferred_width()
+        self.resize(w, self.sizeHint().height())
+
     def _move_bottom_right(self):
         screen = QApplication.primaryScreen().availableGeometry()
-        self.adjustSize()
+        self.resize(self._preferred_width(), self.sizeHint().height())
         self.move(screen.width() - self.width() - 24, screen.height() - self.height() - 48)
 
     # ── mouse / keyboard ──────────────────────────────────────────────────────
@@ -634,7 +648,7 @@ class CrowiaOverlay(QWidget):
         self._prefs["show_response_text"] = show
         self._response_box.setVisible(show)
         prefs_mod.save(self._prefs)
-        self.adjustSize()
+        self._fit()
 
     def _open_prefs_dialog(self):
         dlg = PrefsDialog(self._prefs, parent=self)
