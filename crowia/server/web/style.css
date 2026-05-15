@@ -653,6 +653,38 @@ html, body {
   .nav-rail { display: flex; }
 }
 
+/* ── Markdown in bubbles ─────────────────────────────────────────────────── */
+.bubble p { margin: 0 0 6px; }
+.bubble p:last-child { margin-bottom: 0; }
+.bubble strong { font-weight: 600; }
+.bubble em { font-style: italic; }
+.bubble code {
+  background: rgba(0,0,0,.25);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-family: 'Roboto Mono', monospace;
+  font-size: 12px;
+}
+.bubble pre {
+  background: rgba(0,0,0,.3);
+  border-radius: 8px;
+  padding: 10px 12px;
+  overflow-x: auto;
+  margin: 6px 0;
+}
+.bubble pre code { background: none; padding: 0; font-size: 12px; }
+.bubble ul, .bubble ol {
+  padding-left: 20px;
+  margin: 4px 0;
+}
+.bubble li { margin: 2px 0; }
+.bubble h1, .bubble h2, .bubble h3 {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 6px 0 4px;
+}
+.bubble a { color: var(--md-primary); }
+
 /* ── Snackbar ────────────────────────────────────────────────────────────── */
 .snackbar {
   position: fixed;

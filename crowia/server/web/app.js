@@ -181,6 +181,13 @@ class GiseloApp {
   }
 
   // ── Bubbles ─────────────────────────────────────────────────────────────
+  _md(text) {
+    if (typeof marked !== 'undefined') {
+      return marked.parse(text, { breaks: true, gfm: true });
+    }
+    return this._esc(text).replace(/\n/g, '<br>');
+  }
+
   _addBubble(role, text) {
     const messages = document.getElementById('messages');
     const row = document.createElement('div');
@@ -195,7 +202,11 @@ class GiseloApp {
 
     const bubble = document.createElement('div');
     bubble.className = 'bubble';
-    bubble.textContent = text;
+    if (role === 'assistant') {
+      bubble.innerHTML = this._md(text);
+    } else {
+      bubble.textContent = text;
+    }
     row.appendChild(bubble);
 
     messages.appendChild(row);
@@ -217,7 +228,7 @@ class GiseloApp {
 
   _finalizeAssistant(full) {
     if (this._assistantBubble) {
-      this._assistantBubble.textContent = full;
+      this._assistantBubble.innerHTML = this._md(full);
       this._assistantBubble.classList.remove('streaming');
       this._assistantBubble = null;
     } else {

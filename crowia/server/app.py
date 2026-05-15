@@ -20,6 +20,7 @@ from crowia.transcriber import Transcriber
 from crowia.assistant import Assistant
 from crowia.history import ConversationHistory
 from crowia.server.audio import webm_to_wav, tts_to_wav_bytes
+from crowia.output import _strip_markdown
 
 log = logging.getLogger("giselo.server")
 
@@ -121,12 +122,13 @@ async def websocket_endpoint(ws: WebSocket):
         await send({"type": "done", "content": response})
 
         if tts_enabled and tts_cmd:
-            log.info("TTS: generating audio (%d chars)…", len(response))
+            response_plain = _strip_markdown(response)
+            log.info("TTS: generating audio (%d chars)…", len(response_plain))
             await send({"type": "audio_start"})
             try:
                 wav = await loop.run_in_executor(
                     None,
-                    lambda: tts_to_wav_bytes(response, tts_cmd),
+                    lambda: tts_to_wav_bytes(response_plain, tts_cmd),
                 )
                 log.info("TTS: sending %d bytes", len(wav))
                 await send_bytes(wav)
