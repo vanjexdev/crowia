@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import asyncio
+import datetime
 import logging
 import pathlib
 import sys
@@ -250,8 +251,36 @@ def main():
                 _run_text_pipeline(text, files)
         threading.Thread(target=_wrapper, daemon=True).start()
 
+    def _handle_save_memory():
+        msgs = history.get_messages()
+        if not msgs:
+            output.show("Crowia", "No hay historial que recordar.")
+            return
+        mem_dir = pathlib.Path.home() / ".config/crowia/memories"
+        mem_dir.mkdir(parents=True, exist_ok=True)
+        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        mem_file = mem_dir / f"memory_{ts}.txt"
+        lines = [f"[{m.get('role','?')}]\n{m.get('content','')}\n" for m in msgs]
+        mem_file.write_text("\n".join(lines), encoding="utf-8")
+        output.show("Crowia", f"Memoria guardada: {mem_file.name}")
+
+    def _handle_export_summary():
+        msgs = history.get_messages()
+        if not msgs:
+            output.show("Crowia", "No hay historial que exportar.")
+            return
+        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        export_dir = pathlib.Path.home() / "Documents" / "crowia_exports"
+        export_dir.mkdir(parents=True, exist_ok=True)
+        export_file = export_dir / f"chat_{ts}.txt"
+        lines = [f"--- {m.get('role','?').upper()} ---\n{m.get('content','')}\n" for m in msgs]
+        export_file.write_text("\n".join(lines), encoding="utf-8")
+        output.show("Crowia", f"Exportado: {export_file}")
+
     if overlay:
         overlay.text_submitted.connect(_on_text_submitted)
+        overlay.save_memory.connect(_handle_save_memory)
+        overlay.export_summary.connect(_handle_export_summary)
 
     def run_pipeline():
         wav = recorder.wav_path
