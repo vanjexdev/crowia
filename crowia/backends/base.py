@@ -1,5 +1,6 @@
 import pathlib
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 
 
 class Backend(ABC):
@@ -17,4 +18,8 @@ class Backend(ABC):
         image_path: pathlib.Path | None = None,
         file_paths: list[pathlib.Path] | None = None,
         timeout: int = 120,
-    ) -> str: ...
+        on_chunk: Callable[[str], None] | None = None,
+    ) -> str:
+        """Return full response. If on_chunk provided, call with accumulated
+        text as data arrives (streaming). Called from worker thread."""
+        ...

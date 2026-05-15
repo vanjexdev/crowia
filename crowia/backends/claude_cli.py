@@ -29,7 +29,7 @@ class ClaudeCliBackend(Backend):
                 self._proc.kill()
                 log.info("Claude CLI process killed by cancel()")
 
-    def ask(self, text, system_prompt, history=None, image_path=None, file_paths=None, timeout=120):
+    def ask(self, text, system_prompt, history=None, image_path=None, file_paths=None, timeout=120, on_chunk=None):
         full_text = ""
 
         if history:
@@ -43,11 +43,27 @@ class ClaudeCliBackend(Backend):
 
         if file_paths:
             for fp in file_paths:
-                try:
-                    content = fp.read_text(encoding="utf-8", errors="replace")
-                    full_text += f"[Archivo: {fp}]\n```\n{content}\n```\n\n"
-                except Exception as e:
-                    log.warning("Cannot read %s: %s", fp, e)
+                if fp.is_dir():
+                    lines = []
+                    for item in sorted(fp.rglob("*")):
+                        if any(p.startswith(".") for p in item.parts):
+                            continue
+                        try:
+                            rel = item.relative_to(fp)
+                            indent = "  " * (len(rel.parts) - 1)
+                            lines.append(f"{indent}{item.name}{'/' if item.is_dir() else ''}")
+                        except Exception:
+                            pass
+                        if len(lines) >= 200:
+                            lines.append("  …(truncado)")
+                            break
+                    full_text += f"[Directorio: {fp}]\n```\n" + "\n".join(lines) + "\n```\n\n"
+                else:
+                    try:
+                        content = fp.read_text(encoding="utf-8", errors="replace")
+                        full_text += f"[Archivo: {fp}]\n```\n{content}\n```\n\n"
+                    except Exception as e:
+                        log.warning("Cannot read %s: %s", fp, e)
 
         full_text += text
 
@@ -57,7 +73,6 @@ class ClaudeCliBackend(Backend):
             "--system-prompt", system_prompt,
             "--no-session-persistence",
             "--dangerously-skip-permissions",
-            "--add-dir", "/home/jesusu",
             "--add-dir", str(pathlib.Path.home()),
             "--allowedTools", self._allowed_tools,
             "--disallowedTools", self._disallowed_tools,
@@ -78,12 +93,37 @@ class ClaudeCliBackend(Backend):
             with self._lock:
                 self._proc = subprocess.Popen(
                     cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                    text=True, env=env,
+                    text=True, env=env, bufsize=0,
                 )
-            log.debug("Claude CLI started (pid=%d), waiting...", self._proc.pid)
-            stdout, stderr = self._proc.communicate(timeout=timeout)
-            log.debug("Claude CLI finished (rc=%d, stdout_len=%d)", self._proc.returncode, len(stdout))
+            log.debug("Claude CLI started (pid=%d)", self._proc.pid)
+
+            accumulated = ""
+            _chunk_threshold = 0
+            stderr_data = ""
+
+            if on_chunk:
+                # Streaming: read stdout incrementally
+                while True:
+                    try:
+                        chunk = self._proc.stdout.read(32)
+                    except (OSError, ValueError):
+                        break
+                    if not chunk:
+                        break
+                    accumulated += chunk
+                    # Emit on_chunk at word boundaries or every ~60 chars
+                    if len(accumulated) >= _chunk_threshold + 60 or chunk.endswith((" ", "\n")):
+                        on_chunk(accumulated)
+                        _chunk_threshold = len(accumulated)
+                self._proc.stdout.close()
+                stderr_data = self._proc.stderr.read()
+                self._proc.wait(timeout=10)
+            else:
+                stdout_data, stderr_data = self._proc.communicate(timeout=timeout)
+                accumulated = stdout_data
+
             rc = self._proc.returncode
+            log.debug("Claude CLI finished (rc=%d, out_len=%d)", rc, len(accumulated))
         except subprocess.TimeoutExpired:
             self.cancel()
             return f"[crowia] Claude tardó demasiado ({timeout}s)."
@@ -93,13 +133,13 @@ class ClaudeCliBackend(Backend):
             with self._lock:
                 self._proc = None
 
-        if rc not in (0, -9):  # -9 = killed by cancel
-            log.error("CLI error (rc=%d) stderr: %s | stdout: %s", rc, stderr[:300], stdout[:300])
+        if rc not in (0, -9):
+            log.error("CLI error (rc=%d) stderr: %s | stdout: %s", rc, stderr_data[:300], accumulated[:300])
             return f"[crowia] Error del CLI (rc={rc})"
 
         if rc == -9:
             return ""
 
-        response = stdout.strip()
+        response = accumulated.strip()
         log.info("Claude response (%d chars): %s", len(response), response[:200])
         return response

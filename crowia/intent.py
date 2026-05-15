@@ -50,25 +50,40 @@ _CLEAR_HISTORY_KW = [
 ]
 
 _MEDIA_PAUSE_KW = [
-    "pausa", "pausar", "pausa la música", "pausa el video", "pausa la canción",
-    "para la música", "para la canción", "detén la música", "detener música",
-    "para la música", "stop music", "pause",
+    "pausa la música", "pausa el video", "pausa la canción", "pausa el audio",
+    "pausar la música", "pausar el video",
+    "para la música", "para la canción", "para el audio",
+    "detén la música", "detener música", "detener el audio",
+    "stop music",
 ]
 
 _MEDIA_PLAY_KW = [
-    "reanuda", "continúa", "continua", "reproduce", "play",
-    "reanuda la música", "continúa la música", "pon la música",
+    "reanuda la música", "reanuda el audio", "reanuda el video",
+    "continúa la música", "continua la música",
+    "reproduce la música", "pon la música", "pon música",
     "sigue la música", "sigue reproduciendo",
 ]
 
 _MEDIA_NEXT_KW = [
-    "siguiente", "siguiente canción", "siguiente pista", "skip",
-    "salta la canción", "próxima canción", "proxima cancion", "next",
+    "siguiente canción", "siguiente pista", "siguiente track",
+    "salta la canción", "próxima canción", "proxima cancion",
+    "pon la siguiente", "cambia la canción",
 ]
 
 _MEDIA_PREV_KW = [
-    "anterior", "canción anterior", "pista anterior", "regresa", "atrás",
-    "vuelve a la anterior", "previous", "prev",
+    "canción anterior", "pista anterior", "track anterior",
+    "vuelve a la anterior", "regresa la canción", "cancion anterior",
+]
+
+_TTS_MUTE_KW = [
+    "silencia las respuestas", "desactiva el audio", "desactiva la voz",
+    "silencia la voz", "sin audio", "modo silencioso", "no hables",
+    "apaga el audio", "apaga la voz",
+]
+_TTS_UNMUTE_KW = [
+    "activa el audio", "activa la voz",
+    "activa las respuestas de voz", "pon el audio", "pon la voz",
+    "vuelve a hablar", "habla de nuevo", "quiero escucharte",
 ]
 
 _SKILL_DISABLE_RE = re.compile(
@@ -99,6 +114,8 @@ class Intents:
         self.skill_enable: str | None = None
         self.skill_disable: str | None = None
         self.skill_list: bool = False
+        self.tts_mute: bool = False
+        self.tts_unmute: bool = False
 
 
 def detect(text: str) -> Intents:
@@ -138,6 +155,11 @@ def detect(text: str) -> Intents:
         result.media = "next"
     elif any(kw in low for kw in _MEDIA_PREV_KW):
         result.media = "prev"
+
+    if any(kw in low for kw in _TTS_MUTE_KW):
+        result.tts_mute = True
+    elif any(kw in low for kw in _TTS_UNMUTE_KW):
+        result.tts_unmute = True
 
     m = _SKILL_DISABLE_RE.search(low)
     if m:

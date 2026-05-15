@@ -25,7 +25,7 @@ class OpenCodeBackend(Backend):
             if self._proc and self._proc.poll() is None:
                 self._proc.kill()
 
-    def ask(self, text, system_prompt, history=None, image_path=None, file_paths=None, timeout=120):
+    def ask(self, text, system_prompt, history=None, image_path=None, file_paths=None, timeout=120, on_chunk=None):
         full_text = f"[INSTRUCCIONES DEL SISTEMA]\n{system_prompt}\n[FIN INSTRUCCIONES]\n\n" if system_prompt else ""
         if history:
             lines = []
@@ -79,6 +79,7 @@ class OpenCodeBackend(Backend):
             log.error("OpenCode empty response. stderr: %s", stderr[:300])
             return "[crowia] OpenCode no devolvió respuesta."
         log.info("OpenCode response (%d chars): %s", len(response), response[:200])
+        if on_chunk: on_chunk(response)
         return response
 
     def _parse_json_output(self, output: str) -> str:

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import asyncio
+import datetime
 import logging
 import pathlib
 import sys
@@ -64,20 +65,6 @@ def main():
                 print(f"[!!] {path}  [PERMISSION DENIED]")
         return
 
-    # Qt must be initialized before anything else that touches the display
-    overlay = None
-    qt_app = None
-    if not args.no_ui:
-        try:
-            from PyQt6.QtWidgets import QApplication
-            from crowia.ui import CrowiaOverlay
-            qt_app = QApplication(sys.argv)
-            overlay = CrowiaOverlay()
-            overlay.show()
-        except Exception as e:
-            logging.getLogger("crowia").warning("UI unavailable: %s", e)
-            overlay = None
-
     cfg = load_config(args.config)
     log = logging.getLogger("crowia")
 
@@ -85,6 +72,36 @@ def main():
         cfg["backend"] = args.backend
     if args.hotkey:
         cfg["hotkey"]["keys"] = [k.strip() for k in args.hotkey.split(",")]
+
+    # Qt must be initialized before anything else that touches the display
+    overlay = None
+    qt_app = None
+    ui_queue = None
+    if not args.no_ui:
+        try:
+            import queue
+            from PyQt6.QtWidgets import QApplication
+            from PyQt6.QtCore import QTimer
+            from crowia.ui import CrowiaOverlay
+            qt_app = QApplication(sys.argv)
+            overlay = CrowiaOverlay(cfg=cfg)
+            overlay.show()
+            ui_queue = queue.Queue()
+            # Process UI queue every 50ms
+            def process_ui_queue():
+                try:
+                    while True:
+                        fn, args, kwargs = ui_queue.get_nowait()
+                        fn(*args, **kwargs)
+                except queue.Empty:
+                    pass
+            timer = QTimer()
+            timer.timeout.connect(process_ui_queue)
+            timer.start(50)
+        except Exception as e:
+            logging.getLogger("crowia").warning("UI unavailable: %s", e)
+            overlay = None
+            ui_queue = None
 
     recorder = Recorder(cfg)
     transcriber = Transcriber(cfg)
@@ -96,10 +113,13 @@ def main():
         if overlay:
             overlay.notify("idle")
 
+    output = OutputHandler(cfg)
+
     if overlay:
         overlay._on_cancel = on_cancel
         overlay.set_backend(assistant.current_backend_name)
-    output = OutputHandler(cfg)
+        overlay.tts_toggled.connect(output.set_tts)
+        output.set_tts(overlay._tts_enabled)  # sync prefs → output on startup
 
     history_cfg = cfg.get("history", {})
     history = ConversationHistory(
@@ -112,98 +132,102 @@ def main():
 
     def ui(state: str):
         if overlay:
-            overlay.notify(state)
+            if ui_queue:
+                ui_queue.put((overlay.notify, (state,), {}))
+            else:
+                overlay.notify(state)
 
-    def run_pipeline():
-        wav = recorder.wav_path
-        if wav is None or not wav.exists():
-            log.warning("No WAV file after recording")
-            return
+    def thread_safe_show_status(msg: str):
+        if ui_queue:
+            ui_queue.put((output.show_status, (msg,), {}))
+        else:
+            output.show_status(msg)
 
-        ui("processing")
-        output.show_status("Transcribiendo…")
-        try:
-            text = transcriber.transcribe(wav)
-        except Exception as e:
-            log.error("Transcription error: %s", e)
-            output.show_status(f"Error de transcripción: {e}")
-            ui("idle")
-            return
-        finally:
-            recorder.cleanup(wav)
-
-        if not text:
-            output.show_status("No se escuchó nada.")
-            ui("idle")
-            return
-
-        log.info("Transcribed: %s", text)
-        log.debug("Detecting intents...")
-        intents = intent.detect(text)
-        log.debug("Intents: screenshot=%s volume=%s media=%s files=%s backend=%s",
-                  intents.screenshot, intents.volume, intents.media, intents.files, intents.switch_backend)
-
+    def _handle_intents(intents, text: str) -> bool:
+        """Handle quick intents. Returns True if handled (skip LLM)."""
         if intents.switch_backend:
             msg = assistant.switch_backend(intents.switch_backend)
             if overlay:
                 overlay.set_backend(assistant.current_backend_name)
             output.show("Giselo", msg)
             ui("done")
-            return
-
+            return True
+        if intents.tts_mute:
+            output.set_tts(False)
+            if overlay:
+                overlay.set_tts_state(False)
+            output.show("Giselo", "Audio desactivado.")
+            ui("done")
+            return True
+        if intents.tts_unmute:
+            output.set_tts(True)
+            if overlay:
+                overlay.set_tts_state(True)
+            output.show("Giselo", "Audio activado.")
+            ui("done")
+            return True
         if intents.skill_disable:
-            msg = assistant.disable_skill(intents.skill_disable)
-            output.show("Giselo", msg)
+            output.show("Giselo", assistant.disable_skill(intents.skill_disable))
             ui("done")
-            return
-
+            return True
         if intents.skill_enable:
-            msg = assistant.enable_skill(intents.skill_enable)
-            output.show("Giselo", msg)
+            output.show("Giselo", assistant.enable_skill(intents.skill_enable))
             ui("done")
-            return
-
+            return True
         if intents.skill_list:
             output.show("Giselo", assistant.list_skills())
             ui("done")
-            return
-
+            return True
         if intents.clear_history:
             history.clear()
             output.show("Crowia", "Historial borrado.")
             ui("done")
-            return
-
+            return True
         if intents.media is not None:
-            result = system_control.control_media(intents.media)
-            output.show("Media", result)
+            output.show("Media", system_control.control_media(intents.media))
             ui("done")
-            return
-
+            return True
         if intents.volume is not None and not intents.screenshot and not intents.files:
-            result = system_control.control_volume(intents.volume)
-            output.show("Control de sistema", result)
+            output.show("Sistema", system_control.control_volume(intents.volume))
             ui("done")
+            return True
+        return False
+
+    def _run_text_pipeline(text: str, extra_files: list[pathlib.Path] | None = None):
+        """Shared pipeline for voice transcription and typed text input."""
+        ui("processing")
+        log.info("Text pipeline: %s", text)
+        intents = intent.detect(text)
+
+        if _handle_intents(intents, text):
             return
 
-        screenshot_path: pathlib.Path | None = None
+        screenshot_path = None
         if intents.screenshot:
             output.show_status("Capturando pantalla…")
             screenshot_path = screen.take_screenshot()
 
-        log.debug("Calling assistant.ask (backend=%s)...", assistant.current_backend_name)
-        output.show_status(f"Preguntando a Claude: {text[:50]}…")
+        file_paths = list(intents.files or [])
+        if extra_files:
+            file_paths.extend(extra_files)
+
+        output.show_status(f"Preguntando a {assistant.current_backend_name}: {text[:50]}…")
+
+        def _on_chunk(partial: str):
+            if overlay:
+                overlay.set_response(partial)
 
         try:
             response = assistant.ask(
                 text=text,
                 history=history.get_messages(),
                 image_path=screenshot_path,
-                file_paths=intents.files if intents.files else None,
+                file_paths=file_paths or None,
+                on_chunk=_on_chunk if overlay else None,
             )
         except Exception as e:
-            log.error("Claude error: %s", e)
-            output.show_status(f"Error de Claude: {e}")
+            log.error("Assistant error: %s", e)
+            output.show_status(f"Error: {e}")
             ui("idle")
             return
         finally:
@@ -220,11 +244,75 @@ def main():
             overlay.set_response(response)
         ui("done")
 
+    def _on_text_submitted(text: str, file_strs: list):
+        files = [pathlib.Path(p) for p in file_strs]
+        def _wrapper():
+            with pipeline_lock:
+                _run_text_pipeline(text, files)
+        threading.Thread(target=_wrapper, daemon=True).start()
+
+    def _handle_save_memory():
+        msgs = history.get_messages()
+        if not msgs:
+            output.show("Crowia", "No hay historial que recordar.")
+            return
+        mem_dir = pathlib.Path.home() / ".config/crowia/memories"
+        mem_dir.mkdir(parents=True, exist_ok=True)
+        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        mem_file = mem_dir / f"memory_{ts}.txt"
+        lines = [f"[{m.get('role','?')}]\n{m.get('content','')}\n" for m in msgs]
+        mem_file.write_text("\n".join(lines), encoding="utf-8")
+        output.show("Crowia", f"Memoria guardada: {mem_file.name}")
+
+    def _handle_export_summary():
+        msgs = history.get_messages()
+        if not msgs:
+            output.show("Crowia", "No hay historial que exportar.")
+            return
+        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        export_dir = pathlib.Path.home() / "Documents" / "crowia_exports"
+        export_dir.mkdir(parents=True, exist_ok=True)
+        export_file = export_dir / f"chat_{ts}.txt"
+        lines = [f"--- {m.get('role','?').upper()} ---\n{m.get('content','')}\n" for m in msgs]
+        export_file.write_text("\n".join(lines), encoding="utf-8")
+        output.show("Crowia", f"Exportado: {export_file}")
+
+    if overlay:
+        overlay.text_submitted.connect(_on_text_submitted)
+        overlay.save_memory.connect(_handle_save_memory)
+        overlay.export_summary.connect(_handle_export_summary)
+
+    def run_pipeline():
+        wav = recorder.wav_path
+        if wav is None or not wav.exists():
+            log.warning("No WAV file after recording")
+            return
+
+        output.show_status("Transcribiendo…")
+        try:
+            text = transcriber.transcribe(wav)
+        except Exception as e:
+            log.error("Transcription error: %s", e)
+            output.show_status(f"Error de transcripción: {e}")
+            ui("idle")
+            return
+        finally:
+            recorder.cleanup(wav)
+
+        if not text:
+            output.show_status("No se escuchó nada.")
+            ui("idle")
+            return
+
+        _run_text_pipeline(text)
+
     def on_start():
         nonlocal safety_timer
-        if pipeline_lock.locked():
+        if not pipeline_lock.acquire(blocking=False):
             log.warning("Pipeline already running, ignoring start")
             return
+        pipeline_lock.release()  # Just checking availability
+
         log.info("Recording started")
         ui("recording")
         output.show_status("Grabando…")
@@ -284,89 +372,14 @@ def main():
                 return
 
             log.info("Transcribed: %s", text)
-            intents = intent.detect(text)
-
-            if intents.switch_backend:
-                msg = assistant.switch_backend(intents.switch_backend)
-                if overlay:
-                    overlay.set_backend(assistant.current_backend_name)
-                output.show("Giselo", msg)
-                ui("done")
-                return
-
-            if intents.skill_disable:
-                msg = assistant.disable_skill(intents.skill_disable)
-                output.show("Giselo", msg)
-                ui("done")
-                return
-
-            if intents.skill_enable:
-                msg = assistant.enable_skill(intents.skill_enable)
-                output.show("Giselo", msg)
-                ui("done")
-                return
-
-            if intents.skill_list:
-                output.show("Giselo", assistant.list_skills())
-                ui("done")
-                return
-
-            if intents.clear_history:
-                history.clear()
-                output.show("Crowia", "Historial borrado.")
-                ui("done")
-                return
-
-            if intents.media is not None:
-                result = system_control.control_media(intents.media)
-                output.show("Media", result)
-                ui("done")
-                return
-
-            if intents.volume is not None and not intents.screenshot and not intents.files:
-                result = system_control.control_volume(intents.volume)
-                output.show("Sistema", result)
-                ui("done")
-                return
-
-            screenshot_path = None
-            if intents.screenshot:
-                output.show_status("Capturando pantalla…")
-                screenshot_path = screen.take_screenshot()
-
-            output.show_status(f"Preguntando a Claude: {text[:50]}…")
-            try:
-                response = assistant.ask(
-                    text=text,
-                    history=history.get_messages(),
-                    image_path=screenshot_path,
-                    file_paths=intents.files or None,
-                )
-            except Exception as e:
-                log.error("Claude error: %s", e)
-                output.show_status(f"Error: {e}")
-                ui("idle")
-                return
-            finally:
-                if screenshot_path and screenshot_path.exists():
-                    screenshot_path.unlink(missing_ok=True)
-
-            if intents.volume is not None:
-                system_control.control_volume(intents.volume)
-
-            history.add("user", text)
-            history.add("assistant", response)
-            output.show(text, response)
-            if overlay:
-                overlay.set_response(response)
-            ui("done")
+            _run_text_pipeline(text)
 
         listener = AlwaysOnListener(
             cfg=cfg,
             on_speech_ready=on_speech_ready,
             transcriber=transcriber,
-            on_wake=lambda: (ui("recording"), output.show_status("Escuchando…")),
-            on_idle=lambda: (ui("idle"), output.show_status(f"Di '{wake_phrases[0]}' para activar")),
+            on_wake=lambda: (ui("recording"), thread_safe_show_status("Escuchando…")),
+            on_idle=lambda: (ui("idle"), thread_safe_show_status(f"Di '{wake_phrases[0]}' para activar")),
         )
         log.info("crowia listo. Modo: always-on | Wake: %s | Whisper: %s",
                  wake_phrases, cfg["whisper"]["model"])
@@ -387,7 +400,9 @@ def main():
             cfg["whisper"]["model"],
             cfg["claude"].get("model", "claude-sonnet-4-6"),
         )
-        t = threading.Thread(target=lambda: asyncio.run(listener.run()), daemon=True)
+        def _run_hotkey_listener():
+            asyncio.run(listener.run())
+        t = threading.Thread(target=_run_hotkey_listener, daemon=True)
         t.start()
 
     if qt_app:

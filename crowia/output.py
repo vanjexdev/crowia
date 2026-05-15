@@ -48,6 +48,9 @@ class OutputHandler:
         if result.returncode == 0 and result.stdout.strip():
             self._last_notif_id = result.stdout.strip()
 
+    def set_tts(self, enabled: bool):
+        self.tts_enabled = enabled
+
     def show(self, query: str, response: str):
         # Write full response to file
         self.response_file.parent.mkdir(parents=True, exist_ok=True)
