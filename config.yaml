@@ -44,7 +44,7 @@ always_on:
 
 history:
     enabled: true
-    path: "/tmp/crowia/history.json"
+    path: "~/.config/crowia/history.json"
     max_turns: 10
 
 output:

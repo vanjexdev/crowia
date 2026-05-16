@@ -91,6 +91,15 @@ def load(path: str | None = None) -> dict:
     if cfg["hotkey"]["mode"] not in {"toggle", "push_to_talk"}:
         raise ValueError(f"hotkey.mode must be 'toggle' or 'push_to_talk', got: {cfg['hotkey']['mode']}")
 
+    # Expand ~ in path values
+    for section, key in [
+        ("history", "path"),
+        ("output", "response_file"),
+        ("audio", "tmp_dir"),
+    ]:
+        if section in cfg and key in cfg[section] and isinstance(cfg[section][key], str):
+            cfg[section][key] = str(pathlib.Path(cfg[section][key]).expanduser())
+
     # Create tmp_dir
     pathlib.Path(cfg["audio"]["tmp_dir"]).mkdir(parents=True, exist_ok=True)
 

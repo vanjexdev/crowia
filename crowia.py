@@ -17,6 +17,7 @@ from crowia.transcriber import Transcriber
 from crowia.assistant import Assistant
 from crowia.output import OutputHandler
 from crowia.history import ConversationHistory
+from crowia.memory import MemoryManager
 from crowia.always_on import AlwaysOnListener
 from crowia import intent, screen, system_control
 
@@ -106,6 +107,16 @@ def main():
     recorder = Recorder(cfg)
     transcriber = Transcriber(cfg)
     assistant = Assistant(cfg)
+    memory = MemoryManager()
+    assistant.set_memory_context(memory.build_memory_prompt())
+
+    def _save_memory():
+        msgs = history.get_messages()
+        if msgs:
+            try:
+                memory.save_session(msgs, lambda p: assistant.ask(text=p))
+            except Exception as e:
+                log.warning("Memory save on exit failed: %s", e)
 
     def on_cancel():
         log.info("Cancel requested")
@@ -408,6 +419,7 @@ def main():
     if qt_app:
         import signal
         signal.signal(signal.SIGINT, lambda *_: qt_app.quit())
+        qt_app.aboutToQuit.connect(_save_memory)
         # Timer trick: let Python check signals every 500ms (Qt blocks signal delivery)
         from PyQt6.QtCore import QTimer
         sig_timer = QTimer()
@@ -416,7 +428,12 @@ def main():
         sys.exit(qt_app.exec())
     else:
         # No UI — block main thread
-        threading.Event().wait()
+        try:
+            threading.Event().wait()
+        except KeyboardInterrupt:
+            pass
+        finally:
+            _save_memory()
 
 
 if __name__ == "__main__":

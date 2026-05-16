@@ -24,6 +24,7 @@ class Assistant:
     def __init__(self, cfg: dict):
         self._cfg = cfg
         self._base_prompt = cfg["claude"]["system_prompt"]
+        self._memory_text: str = ""
         self._enabled_skills: list[str] = list(cfg.get("skills", {}).get("enabled", []))
         self._available_skills: list[str] = skills_mod.available(cfg)
         self.system_prompt = self._build_prompt()
@@ -43,9 +44,19 @@ class Assistant:
             cls = ClaudeCliBackend
         return cls(self._cfg)
 
+    def set_memory_context(self, memory_text: str) -> None:
+        self._memory_text = memory_text
+        self.system_prompt = self._build_prompt()
+
     def _build_prompt(self) -> str:
+        parts = []
+        if self._memory_text:
+            parts.append(self._memory_text)
+        parts.append(self._base_prompt)
         skill_text = skills_mod.load_list(self._cfg, self._enabled_skills)
-        return f"{self._base_prompt}\n\n{skill_text}" if skill_text else self._base_prompt
+        if skill_text:
+            parts.append(skill_text)
+        return "\n\n".join(parts)
 
     def _find_skill(self, name: str) -> str | None:
         name_low = name.lower()

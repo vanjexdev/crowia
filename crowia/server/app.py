@@ -20,6 +20,7 @@ from crowia.config import load as load_config
 from crowia.transcriber import Transcriber
 from crowia.assistant import Assistant
 from crowia.history import ConversationHistory
+from crowia.memory import MemoryManager
 from crowia.server.audio import webm_to_wav, tts_to_wav_bytes
 from crowia.server.auth import verify_password, create_token, verify_token
 from crowia.output import _strip_markdown
@@ -35,6 +36,8 @@ history = ConversationHistory(
     path=pathlib.Path(cfg["history"]["path"]),
     max_turns=cfg["history"]["max_turns"],
 )
+memory = MemoryManager()
+assistant.set_memory_context(memory.build_memory_prompt())
 
 _auth_cfg = cfg.get("server", {}).get("auth", {})
 AUTH_ENABLED = _auth_cfg.get("enabled", False)
@@ -132,6 +135,13 @@ async def get_history():
 
 @app.delete("/api/history", dependencies=[Depends(require_auth)])
 async def clear_history():
+    loop = asyncio.get_event_loop()
+    msgs = history.get_messages()
+    if msgs:
+        await loop.run_in_executor(
+            None,
+            lambda: memory.save_session(msgs, lambda p: assistant.ask(text=p)),
+        )
     history.clear()
     return JSONResponse({"ok": True})
 
@@ -272,6 +282,13 @@ async def websocket_endpoint(ws: WebSocket, token: str = ""):
                 await run_pipeline(text)
 
             elif mtype == "clear_history":
+                msgs = history.get_messages()
+                if msgs:
+                    await send({"type": "status", "message": "Guardando memoria…"})
+                    await loop.run_in_executor(
+                        None,
+                        lambda: memory.save_session(msgs, lambda p: assistant.ask(text=p)),
+                    )
                 history.clear()
                 await send({"type": "status", "message": "Historial borrado."})
 
