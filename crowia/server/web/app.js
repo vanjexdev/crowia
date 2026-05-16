@@ -173,7 +173,10 @@ class GiseloApp {
         this._setStatus('idle', 'Listo');
         break;
       case 'audio_start':
+        this._setSkip(true);
+        break;
       case 'audio_end':
+        this._setSkip(false);
         break;
       case 'error':
         this._setStatus('idle', msg.message);
@@ -238,6 +241,12 @@ class GiseloApp {
       this._send({ type: 'clear_history' });
       document.getElementById('messages').innerHTML = '';
       this._snack('Historial borrado');
+    });
+
+    document.getElementById('btn-skip')?.addEventListener('click', () => {
+      this._player.stop();
+      this._setSkip(false);
+      this._setStatus('idle', 'Listo');
     });
   }
 
@@ -374,6 +383,10 @@ class GiseloApp {
   }
 
   // ── Status bar ──────────────────────────────────────────────────────────
+  _setSkip(visible) {
+    document.getElementById('btn-skip')?.classList.toggle('hidden', !visible);
+  }
+
   _setStatus(state, msg) {
     const dot = document.getElementById('status-dot');
     const text = document.getElementById('status-text');

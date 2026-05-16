@@ -40,6 +40,7 @@ export class AudioPlayer {
   constructor() {
     this._ctx = null;
     this._queue = Promise.resolve();
+    this._currentSrc = null;
   }
 
   /** Call once on any user gesture to unblock autoplay policy. */
@@ -61,14 +62,23 @@ export class AudioPlayer {
         const decoded = await ctx.decodeAudioData(arrayBuffer);
         await new Promise(resolve => {
           const src = ctx.createBufferSource();
+          this._currentSrc = src;
           src.buffer = decoded;
           src.connect(ctx.destination);
-          src.onended = resolve;
+          src.onended = () => { this._currentSrc = null; resolve(); };
           src.start();
         });
       } catch (e) {
         console.warn('Audio playback error:', e);
       }
     });
+  }
+
+  stop() {
+    if (this._currentSrc) {
+      try { this._currentSrc.stop(); } catch (_) {}
+      this._currentSrc = null;
+    }
+    this._queue = Promise.resolve(); // discard pending chunks
   }
 }
