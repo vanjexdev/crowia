@@ -1,0 +1,270 @@
+/* ── Navbar ── */
+.navbar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 100;
+    padding: 12px 24px;
+    transition: all 0.3s ease;
+}
+.navbar.scrolled {
+    background: rgba(20, 18, 24, 0.85);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-bottom: 1px solid var(--md-outline-variant);
+    box-shadow: 0 4px 24px rgba(0,0,0,0.3);
+}
+.navbar-inner {
+    max-width: 1200px;
+    margin: 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 24px;
+}
+.navbar-brand {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    text-decoration: none;
+    color: var(--md-on-surface);
+    font-weight: 700;
+    font-size: 1.125rem;
+}
+.navbar-logo {
+    font-size: 24px;
+    color: var(--md-primary);
+}
+.navbar-name {
+    font-family: var(--font);
+}
+.navbar-links {
+    display: flex;
+    gap: 8px;
+    margin-left: auto;
+}
+.navbar-link {
+    padding: 8px 16px;
+    border-radius: var(--radius-full);
+    color: var(--md-on-surface-variant);
+    text-decoration: none;
+    font-size: 0.9375rem;
+    font-weight: 500;
+    transition: color 0.2s, background 0.2s;
+}
+.navbar-link:hover {
+    color: var(--md-on-surface);
+    background: rgba(255,255,255,0.06);
+}
+.navbar-cta {
+    padding: 10px 20px;
+    font-size: 0.875rem;
+    margin-left: 8px;
+}
+
+/* ── Hero ── */
+.hero {
+    min-height: 100vh;
+    padding: 120px 24px 80px;
+    max-width: 1200px;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 64px;
+    align-items: center;
+    position: relative;
+}
+.hero-bg-glow {
+    position: fixed;
+    top: -200px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 800px;
+    height: 600px;
+    background: radial-gradient(ellipse at center, rgba(79,55,139,0.35) 0%, transparent 70%);
+    pointer-events: none;
+    z-index: -1;
+}
+.hero-content {
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+}
+.hero-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+.hero-headline {
+    color: var(--md-on-surface);
+}
+.hero-sub {
+    color: var(--md-on-surface-variant);
+    max-width: 520px;
+}
+.hero-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 8px;
+}
+.hero-mockups {
+    display: flex;
+    align-items: flex-end;
+    gap: 24px;
+    justify-content: center;
+    padding-bottom: 16px;
+}
+.hero-phone { align-self: center; }
+.hero-laptop { align-self: flex-end; }
+
+/* ── Features ── */
+.features-section {
+    border-top: 1px solid var(--md-outline-variant);
+}
+.features-sub {
+    color: var(--md-on-surface-variant);
+    margin-top: 16px;
+    margin-bottom: 56px;
+    max-width: 560px;
+}
+.features-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 20px;
+}
+.feature-card {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+.feature-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: var(--radius-md);
+    background: rgba(255,255,255,0.05);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 24px;
+}
+.feature-icon .material-symbols-rounded { font-size: 26px; }
+.feature-title { color: var(--md-on-surface); }
+.feature-desc { color: var(--md-on-surface-variant); }
+
+/* ── HowTo ── */
+.howto-section {
+    border-top: 1px solid var(--md-outline-variant);
+}
+.howto-sub {
+    color: var(--md-on-surface-variant);
+    margin-top: 16px;
+    margin-bottom: 56px;
+    max-width: 560px;
+}
+.howto-steps {
+    display: flex;
+    flex-direction: column;
+    gap: 40px;
+}
+.howto-step {
+    display: flex;
+    gap: 24px;
+    align-items: flex-start;
+}
+.howto-step-body {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+.howto-step-desc { color: var(--md-on-surface-variant); }
+.code-line { margin: 2px 0; line-height: 1.7; }
+.howto-os-chips {
+    margin-top: 64px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+.howto-os-label { color: var(--md-on-surface-variant); }
+.howto-os-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+/* ── Footer ── */
+.footer {
+    border-top: 1px solid var(--md-outline-variant);
+    padding: 48px 24px;
+}
+.footer-inner {
+    max-width: 1200px;
+    margin: 0 auto;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 32px;
+}
+.footer-brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-right: auto;
+}
+.footer-logo {
+    font-size: 32px;
+    color: var(--md-primary);
+}
+.footer-tagline { color: var(--md-on-surface-variant); margin-top: 2px; }
+.footer-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+.footer-link {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 16px;
+    border-radius: var(--radius-full);
+    color: var(--md-on-surface-variant);
+    text-decoration: none;
+    font-size: 0.875rem;
+    font-weight: 500;
+    transition: color 0.2s, background 0.2s;
+}
+.footer-link:hover { color: var(--md-on-surface); background: rgba(255,255,255,0.06); }
+.footer-link .material-symbols-rounded { font-size: 18px; }
+.footer-copy {
+    width: 100%;
+    color: var(--md-on-surface-variant);
+    opacity: 0.6;
+    font-size: 0.8125rem;
+}
+
+/* ── Responsive ── */
+@media (max-width: 900px) {
+    .hero {
+        grid-template-columns: 1fr;
+        min-height: auto;
+        padding-top: 100px;
+        gap: 48px;
+    }
+    .hero-mockups {
+        order: -1;
+        gap: 16px;
+    }
+    .hero-laptop { display: none; }
+    .hero-content { align-items: center; text-align: center; }
+    .hero-badges, .hero-actions { justify-content: center; }
+    .hero-sub { text-align: center; }
+}
+
+@media (max-width: 600px) {
+    .navbar-links { display: none; }
+    .navbar-cta { margin-left: auto; }
+    .howto-step { flex-direction: column; gap: 12px; }
+    .footer-inner { flex-direction: column; align-items: flex-start; }
+    .footer-brand { margin-right: 0; }
+}
