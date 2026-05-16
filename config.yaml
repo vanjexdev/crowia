@@ -31,6 +31,7 @@ backend: "claude" # claude | codex | opencode
 
 codex:
     model: "" # dejar vacío para usar el default de codex
+    sandbox: "workspace-write" # read-only | workspace-write | danger-full-access
 
 opencode:
     model: "opencode/minimax-m2.5-free" # ver modelos: opencode models

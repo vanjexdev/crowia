@@ -16,7 +16,9 @@ class CodexBackend(Backend):
 
     def __init__(self, cfg: dict):
         self._binary = shutil.which("codex") or "codex"
-        self._model = cfg.get("codex", {}).get("model", "")
+        codex_cfg = cfg.get("codex", {})
+        self._model = codex_cfg.get("model", "")
+        self._sandbox = codex_cfg.get("sandbox", "workspace-write")
         self._proc: subprocess.Popen | None = None
         self._lock = threading.Lock()
 
@@ -46,7 +48,7 @@ class CodexBackend(Backend):
         full_text += text
 
         out_file = pathlib.Path(tempfile.mktemp(suffix=".txt", dir="/tmp/crowia"))
-        cmd = ["codex", "exec", "--output-last-message", str(out_file), full_text]
+        cmd = ["codex", "exec", "--sandbox", self._sandbox, "--output-last-message", str(out_file), full_text]
         if self._model:
             cmd += ["--model", self._model]
 
