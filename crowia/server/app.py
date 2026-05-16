@@ -301,3 +301,13 @@ async def websocket_endpoint(ws: WebSocket, token: str = ""):
         pass
     except Exception as e:
         log.error("WS error: %s", e)
+    finally:
+        msgs = history.get_messages()
+        if msgs:
+            try:
+                await loop.run_in_executor(
+                    None,
+                    lambda: memory.save_session(msgs, lambda p: assistant.ask(text=p)),
+                )
+            except Exception as e:
+                log.warning("Memory save on disconnect failed: %s", e)
