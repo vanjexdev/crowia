@@ -1,4 +1,4 @@
-import { createApp } from 'courvux';
+import { createApp } from './vendor/courvux.js';
 import NavBar from './components/NavBar.js';
 import Hero from './components/Hero.js';
 import Features from './components/Features.js';
