@@ -19,6 +19,7 @@ class CodexBackend(Backend):
         codex_cfg = cfg.get("codex", {})
         self._model = codex_cfg.get("model", "")
         self._sandbox = codex_cfg.get("sandbox", "workspace-write")
+        self._work_dir = codex_cfg.get("working_dir", "")
         self._proc: subprocess.Popen | None = None
         self._lock = threading.Lock()
 
@@ -47,10 +48,20 @@ class CodexBackend(Backend):
 
         full_text += text
 
+        # Resolve working dir: first file's parent → config working_dir → None
+        work_dir: str | None = None
+        if file_paths:
+            work_dir = str(file_paths[0].parent)
+        elif self._work_dir:
+            work_dir = self._work_dir
+
         out_file = pathlib.Path(tempfile.mktemp(suffix=".txt", dir="/tmp/crowia"))
-        cmd = ["codex", "exec", "--sandbox", self._sandbox, "--output-last-message", str(out_file), full_text]
+        cmd = ["codex", "exec", "--sandbox", self._sandbox, "--output-last-message", str(out_file)]
+        if work_dir:
+            cmd += ["--cd", work_dir]
         if self._model:
             cmd += ["--model", self._model]
+        cmd.append(full_text)
 
         env = os.environ.copy()
 
