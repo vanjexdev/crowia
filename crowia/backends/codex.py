@@ -1,10 +1,12 @@
 import logging
 import os
 import pathlib
+import select
 import shutil
 import subprocess
 import tempfile
 import threading
+import time
 
 from .base import Backend
 
@@ -71,12 +73,21 @@ class CodexBackend(Backend):
 
             if on_chunk:
                 live = ""
+                deadline = time.monotonic() + timeout
                 while True:
-                    line = self._proc.stdout.readline()
-                    if not line:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        self.cancel()
+                        return f"[crowia] Codex tardó demasiado ({timeout}s)."
+                    ready = select.select([self._proc.stdout], [], [], min(remaining, 1.0))
+                    if ready[0]:
+                        line = self._proc.stdout.readline()
+                        if not line:
+                            break
+                        live += line
+                        on_chunk(live.strip())
+                    elif self._proc.poll() is not None:
                         break
-                    live += line
-                    on_chunk(live.strip())
                 self._proc.stdout.close()
                 stderr = self._proc.stderr.read()
                 self._proc.wait(timeout=10)

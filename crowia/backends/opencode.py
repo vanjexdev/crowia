@@ -2,9 +2,11 @@ import json
 import logging
 import os
 import pathlib
+import select
 import shutil
 import subprocess
 import threading
+import time
 
 from .base import Backend
 
@@ -62,23 +64,31 @@ class OpenCodeBackend(Backend):
             if on_chunk:
                 accumulated = ""
                 raw_lines = []
+                deadline = time.monotonic() + timeout
                 while True:
-                    line = self._proc.stdout.readline()
-                    if not line:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        self.cancel()
+                        return f"[crowia] OpenCode tardó demasiado ({timeout}s)."
+                    ready = select.select([self._proc.stdout], [], [], min(remaining, 1.0))
+                    if ready[0]:
+                        line = self._proc.stdout.readline()
+                        if not line:
+                            break
+                        raw_lines.append(line)
+                        stripped = line.strip()
+                        if stripped:
+                            try:
+                                event = json.loads(stripped)
+                                if event.get("type") == "text":
+                                    text = event.get("part", {}).get("text", "")
+                                    if text:
+                                        accumulated += text
+                                        on_chunk(accumulated)
+                            except json.JSONDecodeError:
+                                pass
+                    elif self._proc.poll() is not None:
                         break
-                    raw_lines.append(line)
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        event = json.loads(line)
-                        if event.get("type") == "text":
-                            text = event.get("part", {}).get("text", "")
-                            if text:
-                                accumulated += text
-                                on_chunk(accumulated)
-                    except json.JSONDecodeError:
-                        pass
                 self._proc.stdout.close()
                 stderr = self._proc.stderr.read()
                 self._proc.wait(timeout=10)
