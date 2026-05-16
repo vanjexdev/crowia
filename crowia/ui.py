@@ -442,7 +442,7 @@ class CrowiaOverlay(QWidget):
         self._response_box = QTextBrowser()
         self._response_box.setFont(QFont("Sans", 10))
         self._response_box.setMinimumWidth(500)
-        self._response_box.setMinimumHeight(80)
+        self._response_box.setMinimumHeight(600)
         self._response_box.setOpenExternalLinks(False)
         self._response_box.setStyleSheet(
             "QTextBrowser {"

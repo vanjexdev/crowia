@@ -58,7 +58,34 @@ class OpenCodeBackend(Backend):
         try:
             with self._lock:
                 self._proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
-            stdout, stderr = self._proc.communicate(timeout=timeout)
+
+            if on_chunk:
+                accumulated = ""
+                raw_lines = []
+                while True:
+                    line = self._proc.stdout.readline()
+                    if not line:
+                        break
+                    raw_lines.append(line)
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        event = json.loads(line)
+                        if event.get("type") == "text":
+                            text = event.get("part", {}).get("text", "")
+                            if text:
+                                accumulated += text
+                                on_chunk(accumulated)
+                    except json.JSONDecodeError:
+                        pass
+                self._proc.stdout.close()
+                stderr = self._proc.stderr.read()
+                self._proc.wait(timeout=10)
+                stdout = "".join(raw_lines)
+            else:
+                stdout, stderr = self._proc.communicate(timeout=timeout)
+
             rc = self._proc.returncode
             with self._lock:
                 self._proc = None
@@ -67,6 +94,9 @@ class OpenCodeBackend(Backend):
             return f"[crowia] OpenCode tardó demasiado ({timeout}s)."
         except FileNotFoundError:
             return "[crowia] opencode no encontrado."
+        finally:
+            with self._lock:
+                self._proc = None
 
         if rc == -9:
             return ""
@@ -79,7 +109,6 @@ class OpenCodeBackend(Backend):
             log.error("OpenCode empty response. stderr: %s", stderr[:300])
             return "[crowia] OpenCode no devolvió respuesta."
         log.info("OpenCode response (%d chars): %s", len(response), response[:200])
-        if on_chunk: on_chunk(response)
         return response
 
     def _parse_json_output(self, output: str) -> str:

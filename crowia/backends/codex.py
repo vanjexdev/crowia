@@ -67,27 +67,48 @@ class CodexBackend(Backend):
 
         try:
             with self._lock:
-                self._proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env)
-            stdout, stderr = self._proc.communicate(timeout=timeout)
+                self._proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=env, bufsize=1)
+
+            if on_chunk:
+                live = ""
+                while True:
+                    line = self._proc.stdout.readline()
+                    if not line:
+                        break
+                    live += line
+                    on_chunk(live.strip())
+                self._proc.stdout.close()
+                stderr = self._proc.stderr.read()
+                self._proc.wait(timeout=10)
+                stdout = live
+            else:
+                stdout, stderr = self._proc.communicate(timeout=timeout)
+
             rc = self._proc.returncode
             with self._lock:
                 self._proc = None
+
             if rc == -9:
                 return ""
             if out_file.exists():
                 response = out_file.read_text(encoding="utf-8").strip()
                 out_file.unlink(missing_ok=True)
                 log.info("Codex response (%d chars): %s", len(response), response[:200])
-                if on_chunk: on_chunk(response)
+                if on_chunk:
+                    on_chunk(response)
                 return response
             if rc != 0:
                 log.error("Codex error (rc=%d): %s", rc, stderr[:300])
                 return f"[crowia] Error de Codex (rc={rc})"
             response = stdout.strip()
-            if on_chunk: on_chunk(response)
+            if on_chunk:
+                on_chunk(response)
             return response
         except subprocess.TimeoutExpired:
             self.cancel()
             return f"[crowia] Codex tardó demasiado ({timeout}s)."
         except FileNotFoundError:
             return "[crowia] codex CLI no encontrado. Instala con: npm i -g @openai/codex"
+        finally:
+            with self._lock:
+                self._proc = None
