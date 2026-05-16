@@ -1,6 +1,8 @@
 'use strict';
 import { AudioRecorder, AudioPlayer } from './audio.js';
 
+const TOKEN_KEY = 'giselo_token';
+
 class GiseloApp {
   constructor() {
     this._ws = null;
@@ -12,21 +14,104 @@ class GiseloApp {
     this._backend = 'claude';
     this._reconnectDelay = 1000;
     this._snackTimer = null;
+    this._authEnabled = false;
+    this._token = localStorage.getItem(TOKEN_KEY) || '';
   }
 
   // ── Init ────────────────────────────────────────────────────────────────
   async init() {
+    const ok = await this._checkAuth();
+    if (!ok) return; // login screen shown, wait for form submit
+    this._launch();
+  }
+
+  _launch() {
+    document.getElementById('login-screen').classList.add('hidden');
+    document.getElementById('app').classList.remove('hidden');
     this._bindNav();
     this._bindChat();
     this._bindSettings();
     this._connect();
     this._registerSW();
-    await this._loadStatus();
+    this._loadStatus();
+  }
+
+  // ── Auth ────────────────────────────────────────────────────────────────
+  async _checkAuth() {
+    try {
+      const headers = this._token ? { Authorization: `Bearer ${this._token}` } : {};
+      const r = await fetch('/auth/status', { headers });
+      const d = await r.json();
+      this._authEnabled = d.auth_enabled;
+      if (d.authenticated) return true;
+    } catch (_) {
+      return true; // if server unreachable, try anyway
+    }
+    this._showLogin();
+    return false;
+  }
+
+  _showLogin() {
+    document.getElementById('app').classList.add('hidden');
+    document.getElementById('login-screen').classList.remove('hidden');
+    document.getElementById('login-password').focus();
+
+    document.getElementById('login-form').addEventListener('submit', async e => {
+      e.preventDefault();
+      const username = document.getElementById('login-username').value.trim();
+      const password = document.getElementById('login-password').value;
+      const errEl = document.getElementById('login-error');
+      const spinner = document.getElementById('login-spinner');
+      const btnText = document.getElementById('login-btn-text');
+      const btn = document.getElementById('login-submit');
+
+      errEl.classList.add('hidden');
+      spinner.classList.remove('hidden');
+      btnText.style.opacity = '0';
+      btn.disabled = true;
+
+      try {
+        const r = await fetch('/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password }),
+        });
+        const d = await r.json();
+        if (d.ok) {
+          this._token = d.token || '';
+          if (this._token) localStorage.setItem(TOKEN_KEY, this._token);
+          this._launch();
+        } else {
+          errEl.textContent = d.message || 'Credenciales inválidas';
+          errEl.classList.remove('hidden');
+          document.getElementById('login-password').value = '';
+          document.getElementById('login-password').focus();
+        }
+      } catch (_) {
+        errEl.textContent = 'Error de conexión';
+        errEl.classList.remove('hidden');
+      } finally {
+        spinner.classList.add('hidden');
+        btnText.style.opacity = '1';
+        btn.disabled = false;
+      }
+    });
+  }
+
+  _authHeaders() {
+    return this._token ? { Authorization: `Bearer ${this._token}` } : {};
+  }
+
+  _logout() {
+    localStorage.removeItem(TOKEN_KEY);
+    this._token = '';
+    location.reload();
   }
 
   async _loadStatus() {
     try {
-      const r = await fetch('/api/status');
+      const r = await fetch('/api/status', { headers: this._authHeaders() });
+      if (r.status === 401) { this._logout(); return; }
       const d = await r.json();
       this._backend = d.backend;
       this._ttsEnabled = d.tts;
@@ -38,7 +123,8 @@ class GiseloApp {
   // ── WebSocket ───────────────────────────────────────────────────────────
   _connect() {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    this._ws = new WebSocket(`${proto}//${location.host}/ws`);
+    const tokenParam = this._token ? `?token=${encodeURIComponent(this._token)}` : '';
+    this._ws = new WebSocket(`${proto}//${location.host}/ws${tokenParam}`);
     this._ws.binaryType = 'arraybuffer';
 
     this._ws.onopen = () => {
@@ -48,7 +134,8 @@ class GiseloApp {
 
     this._ws.onmessage = e => this._onMessage(e);
 
-    this._ws.onclose = () => {
+    this._ws.onclose = e => {
+      if (e.code === 4401) { this._logout(); return; }
       this._setStatus('error', 'Reconectando…');
       setTimeout(() => {
         this._reconnectDelay = Math.min(this._reconnectDelay * 2, 10000);
@@ -58,21 +145,19 @@ class GiseloApp {
   }
 
   _send(obj) {
-    if (this._ws.readyState === WebSocket.OPEN) this._ws.send(JSON.stringify(obj));
+    if (this._ws?.readyState === WebSocket.OPEN) this._ws.send(JSON.stringify(obj));
   }
 
   _sendBinary(blob) {
-    if (this._ws.readyState === WebSocket.OPEN) this._ws.send(blob);
+    if (this._ws?.readyState === WebSocket.OPEN) this._ws.send(blob);
   }
 
   _onMessage(e) {
     if (e.data instanceof ArrayBuffer) {
-      console.log('[audio] received ArrayBuffer', e.data.byteLength, 'bytes, ttsEnabled=', this._ttsEnabled);
       if (this._ttsEnabled) this._player.playWav(e.data.slice(0));
       return;
     }
     const msg = JSON.parse(e.data);
-    console.log('[ws]', msg.type, msg.content?.slice?.(0,40) ?? '');
     switch (msg.type) {
       case 'status':
         this._setStatus('processing', msg.message);
@@ -88,7 +173,6 @@ class GiseloApp {
         this._setStatus('idle', 'Listo');
         break;
       case 'audio_start':
-        break;
       case 'audio_end':
         break;
       case 'error':
@@ -222,8 +306,7 @@ class GiseloApp {
       this._assistantBubble.classList.add('streaming');
     }
     this._assistantBubble.textContent += chunk;
-    const messages = document.getElementById('messages');
-    messages.scrollTop = messages.scrollHeight;
+    document.getElementById('messages').scrollTop = 99999;
   }
 
   _finalizeAssistant(full) {
@@ -234,8 +317,7 @@ class GiseloApp {
     } else {
       this._addBubble('assistant', full);
     }
-    const messages = document.getElementById('messages');
-    messages.scrollTop = messages.scrollHeight;
+    document.getElementById('messages').scrollTop = 99999;
   }
 
   // ── History view ────────────────────────────────────────────────────────
@@ -243,7 +325,8 @@ class GiseloApp {
     const list = document.getElementById('history-list');
     list.innerHTML = '';
     try {
-      const r = await fetch('/api/history');
+      const r = await fetch('/api/history', { headers: this._authHeaders() });
+      if (r.status === 401) { this._logout(); return; }
       const d = await r.json();
       if (!d.messages?.length) {
         list.innerHTML = '<div class="empty-state"><span class="material-symbols-rounded">history</span>Sin historial</div>';
@@ -258,7 +341,7 @@ class GiseloApp {
         `;
         list.appendChild(item);
       });
-    } catch (e) {
+    } catch (_) {
       list.innerHTML = '<div class="empty-state">Error cargando historial</div>';
     }
   }
@@ -276,6 +359,10 @@ class GiseloApp {
         btn.classList.add('active');
       });
     });
+
+    const logoutItem = document.getElementById('logout-item');
+    if (this._authEnabled && logoutItem) logoutItem.style.display = '';
+    document.getElementById('btn-logout')?.addEventListener('click', () => this._logout());
   }
 
   _syncSettingsUI() {
@@ -315,9 +402,7 @@ class GiseloApp {
   // ── Service Worker ──────────────────────────────────────────────────────
   async _registerSW() {
     if ('serviceWorker' in navigator) {
-      try {
-        await navigator.serviceWorker.register('/sw.js');
-      } catch (_) {}
+      try { await navigator.serviceWorker.register('/sw.js'); } catch (_) {}
     }
   }
 

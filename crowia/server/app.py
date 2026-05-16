@@ -9,9 +9,10 @@ import threading
 PROJECT_ROOT = pathlib.Path(__file__).parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, Depends
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 import os
 
@@ -20,6 +21,7 @@ from crowia.transcriber import Transcriber
 from crowia.assistant import Assistant
 from crowia.history import ConversationHistory
 from crowia.server.audio import webm_to_wav, tts_to_wav_bytes
+from crowia.server.auth import verify_password, create_token, verify_token
 from crowia.output import _strip_markdown
 
 log = logging.getLogger("giselo.server")
@@ -34,9 +36,77 @@ history = ConversationHistory(
     max_turns=cfg["history"]["max_turns"],
 )
 
+_auth_cfg = cfg.get("server", {}).get("auth", {})
+AUTH_ENABLED = _auth_cfg.get("enabled", False)
+AUTH_USERNAME = _auth_cfg.get("username", "vanjex")
+AUTH_HASH = _auth_cfg.get("password_hash", "")
+AUTH_SECRET = _auth_cfg.get("token_secret", "")
+AUTH_EXPIRE = _auth_cfg.get("token_expire_hours", 72)
+
 app = FastAPI(title="Giselo Web")
 app.mount("/static", StaticFiles(directory=str(WEB_DIR)), name="static")
 
+_bearer = HTTPBearer(auto_error=False)
+
+
+def _check_token(token: str | None) -> bool:
+    if not AUTH_ENABLED:
+        return True
+    if not token or not AUTH_SECRET:
+        return False
+    return verify_token(token, AUTH_SECRET) is not None
+
+
+async def require_auth(
+    request: Request,
+    creds: HTTPAuthorizationCredentials | None = Depends(_bearer),
+) -> None:
+    if not AUTH_ENABLED:
+        return
+    token = creds.credentials if creds else None
+    if not _check_token(token):
+        raise _unauthorized()
+
+
+def _unauthorized():
+    from fastapi import HTTPException
+    return HTTPException(status_code=401, detail="No autorizado")
+
+
+# ── Auth endpoints ────────────────────────────────────────────────────────────
+
+@app.post("/auth/login")
+async def login(request: Request):
+    body = await request.json()
+    username = body.get("username", "")
+    password = body.get("password", "")
+
+    if not AUTH_ENABLED:
+        return JSONResponse({"ok": True, "token": "", "message": "Auth desactivado"})
+
+    if not AUTH_HASH or not AUTH_SECRET:
+        return JSONResponse(
+            {"ok": False, "message": "Auth no configurado (password_hash / token_secret vacíos)"},
+            status_code=503,
+        )
+
+    if username != AUTH_USERNAME or not verify_password(password, AUTH_HASH):
+        return JSONResponse({"ok": False, "message": "Credenciales inválidas"}, status_code=401)
+
+    token = create_token(username, AUTH_SECRET, AUTH_EXPIRE)
+    return JSONResponse({"ok": True, "token": token})
+
+
+@app.get("/auth/status")
+async def auth_status(creds: HTTPAuthorizationCredentials | None = Depends(_bearer)):
+    if not AUTH_ENABLED:
+        return JSONResponse({"auth_enabled": False, "authenticated": True})
+    token = creds.credentials if creds else None
+    ok = _check_token(token)
+    return JSONResponse({"auth_enabled": True, "authenticated": ok})
+
+
+# ── Static routes ─────────────────────────────────────────────────────────────
 
 @app.get("/")
 async def index():
@@ -53,18 +123,20 @@ async def sw():
     return FileResponse(WEB_DIR / "sw.js", media_type="application/javascript")
 
 
-@app.get("/api/history")
+# ── API routes (protected) ────────────────────────────────────────────────────
+
+@app.get("/api/history", dependencies=[Depends(require_auth)])
 async def get_history():
     return JSONResponse({"messages": history.get_messages()})
 
 
-@app.delete("/api/history")
+@app.delete("/api/history", dependencies=[Depends(require_auth)])
 async def clear_history():
     history.clear()
     return JSONResponse({"ok": True})
 
 
-@app.get("/api/status")
+@app.get("/api/status", dependencies=[Depends(require_auth)])
 async def status():
     return JSONResponse({
         "backend": assistant.current_backend_name,
@@ -73,8 +145,14 @@ async def status():
     })
 
 
+# ── WebSocket ─────────────────────────────────────────────────────────────────
+
 @app.websocket("/ws")
-async def websocket_endpoint(ws: WebSocket):
+async def websocket_endpoint(ws: WebSocket, token: str = ""):
+    if AUTH_ENABLED and not _check_token(token or None):
+        await ws.close(code=4401)
+        return
+
     await ws.accept()
     loop = asyncio.get_event_loop()
     tts_cmd = cfg["output"].get("tts_command", [])
