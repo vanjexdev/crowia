@@ -402,7 +402,7 @@ class CrowiaOverlay(QWidget):
         self._skip_btn.setToolTip("Saltar audio")
         self._skip_btn.setStyleSheet(_btn_style(160, 100, 20))
         self._skip_btn.setFixedSize(34, 30)
-        self._skip_btn.clicked.connect(self.skip_tts)
+        self._skip_btn.clicked.connect(lambda: (self.skip_tts.emit(), self._apply_state("idle")))
         self._skip_btn.hide()
         left_btns.addWidget(self._skip_btn)
 
@@ -513,7 +513,10 @@ class CrowiaOverlay(QWidget):
         if state == "done":
             if self._tts_enabled:
                 self._skip_btn.show()
-            QTimer.singleShot(3000, lambda: self._apply_state("idle"))
+                # keep overlay open long enough for TTS to finish
+                QTimer.singleShot(120_000, lambda: self._apply_state("idle"))
+            else:
+                QTimer.singleShot(3000, lambda: self._apply_state("idle"))
         if state == "idle":
             self._skip_btn.hide()
         self.show()
