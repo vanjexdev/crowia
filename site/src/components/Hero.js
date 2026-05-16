@@ -50,11 +50,7 @@ export default {
                 <div class="mockup-phone hero-phone" style="transform: rotate(-4deg) translateY(20px);">
                     <div class="mockup-phone-island"></div>
                     <div class="mockup-phone-screen">
-                        <div class="placeholder-media">
-                            <span class="material-symbols-rounded">smartphone</span>
-                            <span>Web App GIF</span>
-                            <span style="opacity:0.5;font-size:0.7rem;">Drop your recording here</span>
-                        </div>
+                        <img src="/crowia/mobile.gif" alt="Giselo Web App" />
                     </div>
                 </div>
 
@@ -62,11 +58,7 @@ export default {
                 <div class="mockup-laptop hero-laptop">
                     <div class="mockup-laptop-lid">
                         <div class="mockup-laptop-display">
-                            <div class="placeholder-media">
-                                <span class="material-symbols-rounded">computer</span>
-                                <span>Desktop Overlay GIF</span>
-                                <span style="opacity:0.5;font-size:0.7rem;">Drop your recording here</span>
-                            </div>
+                            <img src="/crowia/desktop.gif" alt="Giselo Desktop Overlay" />
                         </div>
                     </div>
                     <div class="mockup-laptop-base"></div>

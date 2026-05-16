@@ -4,9 +4,11 @@ __pycache__/
 .venv/
 .venv-server/
 config.local.yaml
+config.server.yaml
 image.png
 # site
 site/node_modules/
+site/pnpm-lock.yaml
 # certs
 *.crt
 *.key

@@ -1,59 +1,75 @@
 # Skill: Proyecto Crowia / Giselo
 
-Giselo es el asistente de voz local del usuario. El código vive en `~/Workspace/agents/crowia/`. Repo GitHub: `vanjexdev/crowia` (cuenta `github-vanjex`).
+Giselo es el asistente de voz local del usuario. Código en `~/Workspace/agents/crowia/`. Repo: `vanjexdev/crowia` (remote `origin`, alias SSH `github-vanjex`).
 
 ## Estructura clave
 
 ```
 crowia/
 ├── crowia.py              # Entry point hotkey/always-on
+├── giselo-launcher        # UI PyQt6 para gestionar instancias
 ├── run_server.py          # Entry point servidor web PWA
-├── config.yaml            # Config principal
-├── config.local.yaml      # Generado por giselo-doctor (ignorado en git)
+├── launch-desktop.sh      # Script: lanza giselo-launcher
+├── launch-server.sh       # Script: lanza servidor web
+├── config.yaml            # Config base (trackeado, sin secrets)
+├── config.local.yaml      # Generado por giselo-doctor (gitignored)
+├── config.server.yaml     # Config VM/VPS con auth (gitignored)
 ├── scripts/giselo-doctor  # Detecta OS, escribe config.local.yaml
 ├── site/                  # Fuente del landing page (Vite + Courvux)
+│   ├── src/vendor/courvux.js  # Courvux vendoreado (sin git deps)
+│   ├── src/components/    # NavBar, Hero, Features, HowTo, Footer
+│   └── public/            # GIFs: mobile.gif, desktop.gif
 ├── docs/                  # Build compilado → GitHub Pages
-├── .github/workflows/pages.yml  # CI deploy GH Pages
+├── .github/workflows/pages.yml
 └── crowia/
-    ├── config.py          # load() — deep merge config.yaml + config.local.yaml
-    ├── assistant.py       # ask() con on_chunk streaming, switch_backend()
-    ├── output.py          # _strip_markdown(), _speak() via piper-tts subprocess
-    ├── intent.py          # detect() — keywords en español
+    ├── config.py          # deep merge config.yaml + config.local.yaml
+    ├── assistant.py       # ask() con on_chunk streaming
+    ├── output.py          # _strip_markdown(), _speak() piper-tts
+    ├── intent.py          # detect() keywords español
     ├── transcriber.py     # Whisper via faster-whisper
-    ├── ui.py              # PyQt6 QSplitter overlay (CrowiaOverlay)
-    ├── prefs.py           # Persistencia de preferencias UI
-    ├── history.py         # ConversationHistory JSON
+    ├── ui.py              # PyQt6 QSplitter overlay
     └── server/
-        ├── app.py         # FastAPI + WebSocket (voz+texto+TTS)
-        ├── audio.py       # webm_to_wav() ffmpeg, tts_to_wav_bytes() piper
+        ├── app.py         # FastAPI + WebSocket + auth JWT
+        ├── auth.py        # bcrypt + PyJWT
+        ├── audio.py       # webm_to_wav(), tts_to_wav_bytes()
         └── web/           # PWA: index.html, app.js, audio.js, style.css
 ```
 
-## Cómo correr
+## Comandos de arranque
 
 ```bash
-# Modo hotkey (desktop)
-.venv/bin/python3 crowia.py
+# Desktop
+./launch-desktop.sh           # lanza giselo-launcher (UI instancias)
 
-# Modo always-on (wake word)
-.venv/bin/python3 crowia.py --always-on
+# Servidor web (desde la VM, en ~/host/Workspace/agents/crowia/)
+./launch-server.sh
 
-# Servidor web (acceso remoto desde celular/VM)
-.venv/bin/python3 run_server.py --port 8181 \
-  --config ~/config.server.yaml \
-  --ssl-cert ~/giselo.crt --ssl-key ~/giselo.key
-
-# Landing page (desarrollo)
-cd site && npm run dev
-
-# Landing page (build para GH Pages)
-cd site && npm run build  # genera docs/
+# Landing page
+cd site && pnpm dev           # desarrollo
+cd site && pnpm build         # genera docs/
 ```
 
-## Backends disponibles
+## Auth JWT (web app)
 
-| Backend | Config | Comando de voz |
-|---------|--------|----------------|
+- Desactivado por defecto. Activar en `config.local.yaml` o `config.server.yaml`:
+  ```yaml
+  server:
+    auth:
+      enabled: true
+      username: "vanjex"
+      password_hash: "<bcrypt>"   # generar con auth.hash_password()
+      token_secret: "<hex>"       # generar con auth.random_secret()
+      token_expire_hours: 72
+  ```
+- Token se guarda en `localStorage` del browser
+- WS protegido con `?token=<jwt>` en la URL
+- API protegida con `Authorization: Bearer <token>`
+- WS cierra con código 4401 si token inválido → browser hace logout
+
+## Backends
+
+| Backend | Config | Voz |
+|---------|--------|-----|
 | Claude CLI | `backend: claude` | "usa claude" |
 | OpenCode | `backend: opencode` | "usa opencode" |
 | Codex | `backend: codex` | "usa codex" |
@@ -62,55 +78,42 @@ cd site && npm run build  # genera docs/
 
 - `main` — producción
 - `staging` — pre-producción
-- `feat/*` — features en desarrollo
+- `feat/web-auth` — auth JWT + pnpm + GIFs (activa)
 
-Flujo: `feat/x` → `staging` → `main`. No hacer push directo sin confirmar.
-
-**Git config local del repo:** `Vanjex <vanjexdev@gmail.com>` (seteado con `git config --local`).
-No heredar del global — el global tiene otro email.
+Flujo: `feat/x` → `staging` → `main`. **No hacer push sin que el usuario lo pida.**
 
 ## TTS (piper-tts)
 
-- **Host (CachyOS)**: binario en `/usr/bin/piper-tts`, modelo en `~/.local/share/piper/es_ES-davefx-medium.onnx`
-- **VM (Ubuntu Server)**: usa Python API `PiperVoice.load()` + `synthesize_wav()` — no binario, modelo accesible vía mount
-- `output.py._speak()` detecta si el cmd tiene `piper-tts` en `cmd[0]` → pipe a aplay
-- `server/audio.py.tts_to_wav_bytes()` → si binario no existe → fallback Python API
-- WAV params deben setearse ANTES de llamar `synthesize_wav()`
-
-## Servidor Web PWA
-
-- FastAPI + WebSocket en `/ws`
-- Frontend Material Design 3, vanilla JS
-- Mobile: bottom nav + FAB micrófono central
-- Desktop/tablet: navigation rail lateral
-- Voz: `MediaRecorder` → WebM → ffmpeg → WAV → Whisper → LLM → piper → WAV → Web Audio API
-- HTTPS requerido para micrófono: `sudo tailscale cert <hostname>.ts.net`
-- `AudioContext.resume()` debe llamarse en gesture del usuario (autoplay policy)
-
-## Landing Page (GitHub Pages)
-
-- Fuente: `site/` — Vite + Courvux (`vanjexdev/courvux` de GitHub)
-- Output: `docs/` — commiteado al repo, sirve como GH Pages
-- URL: `https://vanjexdev.github.io/crowia/`
-- Config GH Pages: Settings → Pages → Deploy from branch → `main` / `/docs`
-- Para agregar GIFs: poner en `site/public/`, reemplazar `placeholder-media` en `site/src/components/Hero.js`, hacer build y commitear `docs/`
+- **Host**: `/usr/bin/piper-tts`, modelo `~/.local/share/piper/es_ES-davefx-medium.onnx`
+- **VM**: Python API `PiperVoice.load() + synthesize_wav()` (sin binario)
+- WAV params deben setearse ANTES de `synthesize_wav()`
+- `AudioContext.resume()` requerido en gesture del usuario (autoplay policy)
 
 ## VM Ubuntu Server (Tailscale)
 
-- Hostname: `vanjex-ubuntu.tailc65b67.ts.net`
-- IP Tailscale: `100.113.181.126`
-- Mount del host: `~/host/` (= `/home/jesusu/` del host)
-- Proyecto: `~/host/Workspace/agents/crowia/`
-- Venv servidor: `~/host/Workspace/agents/crowia/.venv-server/`
-- Config servidor: `~/config.server.yaml`
-- Certs: `~/giselo.crt`, `~/giselo.key`
-- Comando arranque: `.venv-server/bin/python3 run_server.py --port 8181 --config ~/config.server.yaml --ssl-cert ~/giselo.crt --ssl-key ~/giselo.key`
+```
+hostname: vanjex-ubuntu.tailc65b67.ts.net  |  IP: 100.113.181.126
+mount:    ~/host/ = /home/jesusu/ del host
+proyecto: ~/host/Workspace/agents/crowia/
+venv:     .venv-server/
+config:   config.server.yaml (en raíz del proyecto, gitignored)
+certs:    ~/giselo.crt, ~/giselo.key
+```
 
-## Config importante
+## Landing Page (GitHub Pages)
 
-- `config.local.yaml` se genera con `./scripts/giselo-doctor` — no editar a mano, no committear
-- Para la VM usar `~/config.server.yaml` aparte (no se sube al repo)
-- `CROWIA_CONFIG` env var overridea el path de config en `app.py`
+- `site/` → Vite + Courvux (vendoreado, sin dependencias git)
+- `docs/` → build commiteado, sirve GH Pages
+- pnpm: `onlyBuiltDependencies: ["esbuild"]` en `package.json`
+- URL: `https://vanjexdev.github.io/crowia/`
+- GIFs en `site/public/`: `mobile.gif` (web app) y `desktop.gif` (overlay)
+
+## Archivos sensibles (NUNCA committear)
+
+- `config.local.yaml` — gitignored
+- `config.server.yaml` — gitignored
+- `*.crt`, `*.key` — gitignored
+- `~/.config/crowia/google_*.json` — fuera del repo
 
 ## Comandos de voz clave
 
@@ -122,11 +125,3 @@ No heredar del global — el global tiene otro email.
 | "activa el audio" | TTS on |
 | "mira la pantalla" | Screenshot → IA |
 | "sube/baja el volumen" | pactl ±10% |
-
-## Archivos sensibles (NO committear)
-
-- `config.local.yaml` — paths locales del OS (ya desTrackeado)
-- `~/.config/crowia/google_credentials.json`
-- `~/.config/crowia/google_token.json`
-- Certs Tailscale (`*.crt`, `*.key`)
-- `~/config.server.yaml` en la VM

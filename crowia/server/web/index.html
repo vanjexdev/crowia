@@ -15,6 +15,30 @@
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
+<!-- ── Login ── -->
+<div id="login-screen" class="login-screen hidden">
+  <div class="login-card">
+    <div class="login-logo">G</div>
+    <h1 class="login-title">Giselo</h1>
+    <p class="login-sub">Ingresa tus credenciales para continuar</p>
+    <form id="login-form" autocomplete="on">
+      <div class="login-field">
+        <span class="material-symbols-rounded login-field-icon">person</span>
+        <input type="text" id="login-username" name="username" placeholder="Usuario" autocomplete="username" />
+      </div>
+      <div class="login-field">
+        <span class="material-symbols-rounded login-field-icon">lock</span>
+        <input type="password" id="login-password" name="password" placeholder="Contraseña" autocomplete="current-password" />
+      </div>
+      <div id="login-error" class="login-error hidden"></div>
+      <button type="submit" class="login-btn" id="login-submit">
+        <span id="login-btn-text">Entrar</span>
+        <div id="login-spinner" class="login-spinner hidden"></div>
+      </button>
+    </form>
+  </div>
+</div>
+
 <div id="app">
 
   <!-- ── Navigation Rail (desktop/tablet) ── -->
@@ -131,6 +155,16 @@
             <div class="settings-item-label">Giselo Web</div>
             <div class="settings-item-sub">Interfaz remota vía Tailscale VPN</div>
           </div>
+        </div>
+        <div class="settings-item" id="logout-item" style="display:none">
+          <span class="material-symbols-rounded settings-item-icon">logout</span>
+          <div class="settings-item-text">
+            <div class="settings-item-label">Cerrar sesión</div>
+            <div class="settings-item-sub">Elimina el token local</div>
+          </div>
+          <button class="icon-btn" id="btn-logout" title="Cerrar sesión">
+            <span class="material-symbols-rounded">logout</span>
+          </button>
         </div>
       </div>
     </div>
