@@ -8,6 +8,7 @@ export default {
                 </a>
                 <nav class="navbar-links">
                     <a href="#features" class="navbar-link">Features</a>
+                    <a href="#why" class="navbar-link">Why Giselo</a>
                     <a href="#install" class="navbar-link">Install</a>
                     <a href="https://github.com/vanjexdev/crowia" target="_blank" rel="noopener" class="navbar-link">GitHub</a>
                 </nav>
