@@ -79,6 +79,13 @@ class HotkeyListener:
     def _fire(self, callback: Callable[[], None]):
         threading.Thread(target=callback, daemon=True).start()
 
+    def stop(self):
+        loop = getattr(self, "_loop", None)
+        tasks = getattr(self, "_tasks", [])
+        if loop and tasks:
+            for t in tasks:
+                loop.call_soon_threadsafe(t.cancel)
+
     async def run(self):
         devices = self._find_keyboard_devices()
         if not devices:
@@ -89,5 +96,9 @@ class HotkeyListener:
             )
         log.info("Listening on %d keyboard device(s). Hotkey: %s (%s mode)",
                  len(devices), list(self.target_keys), self.mode)
-        tasks = [asyncio.create_task(self._monitor_device(d)) for d in devices]
-        await asyncio.gather(*tasks)
+        self._loop = asyncio.get_running_loop()
+        self._tasks = [asyncio.create_task(self._monitor_device(d)) for d in devices]
+        try:
+            await asyncio.gather(*self._tasks)
+        except asyncio.CancelledError:
+            pass

@@ -15,7 +15,7 @@ from PyQt6.QtCore import Qt, QTimer, pyqtSignal, pyqtSlot, QObject
 from PyQt6.QtGui import QPixmap, QPainter, QColor, QFont
 from PyQt6.QtWidgets import (
     QApplication, QCheckBox, QDialog, QDialogButtonBox,
-    QHBoxLayout, QLabel, QMenu, QPlainTextEdit, QPushButton,
+    QHBoxLayout, QLabel, QLineEdit, QMenu, QPlainTextEdit, QPushButton,
     QSplitter, QTextBrowser, QVBoxLayout, QWidget,
 )
 
@@ -272,11 +272,11 @@ class TextInputPanel(QWidget):
 
 
 class PrefsDialog(QDialog):
-    def __init__(self, prefs: dict, parent=None):
+    def __init__(self, prefs: dict, hotkey_keys: list[str], parent=None):
         super().__init__(parent)
         self.setWindowTitle("Giselo — Preferencias")
         self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
-        self.setMinimumWidth(320)
+        self.setMinimumWidth(400)
         self._prefs = dict(prefs)
 
         layout = QVBoxLayout(self)
@@ -298,12 +298,48 @@ class PrefsDialog(QDialog):
             self._cb_md.setToolTip("pip install markdown para habilitar")
         layout.addWidget(self._cb_md)
 
+        # ── Hotkey ──────────────────────────────────────────────────────────
+        hotkey_lbl = QLabel("Hotkey (nombres evdev, separados por coma):")
+        layout.addWidget(hotkey_lbl)
+
+        self._hotkey_edit = QLineEdit(",".join(hotkey_keys))
+        self._hotkey_edit.setPlaceholderText("ej: KEY_RIGHTCTRL,KEY_GRAVE")
+        self._hotkey_hint = QLabel("")
+        self._hotkey_hint.setStyleSheet("color: #cc4444; font-size: 11px;")
+        self._hotkey_edit.textChanged.connect(self._validate_hotkey)
+        layout.addWidget(self._hotkey_edit)
+        layout.addWidget(self._hotkey_hint)
+
+        hint = QLabel("Teclas: KEY_RIGHTCTRL, KEY_LEFTALT, KEY_GRAVE, KEY_F1…F12, KEY_1…KEY_0")
+        hint.setStyleSheet("color: #888; font-size: 10px;")
+        layout.addWidget(hint)
+
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
-        buttons.accepted.connect(self.accept)
+        buttons.accepted.connect(self._on_accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+
+    def _validate_hotkey(self, text: str) -> bool:
+        from evdev import ecodes
+        keys = [k.strip() for k in text.split(",") if k.strip()]
+        invalid = [k for k in keys if not hasattr(ecodes, k)]
+        if invalid:
+            self._hotkey_hint.setText(f"Desconocidas: {', '.join(invalid)}")
+            return False
+        if not keys:
+            self._hotkey_hint.setText("Ingresa al menos una tecla.")
+            return False
+        self._hotkey_hint.setText("")
+        return True
+
+    def _on_accept(self):
+        if self._validate_hotkey(self._hotkey_edit.text()):
+            self.accept()
+
+    def hotkey_keys(self) -> list[str]:
+        return [k.strip() for k in self._hotkey_edit.text().split(",") if k.strip()]
 
     def result_prefs(self) -> dict:
         return {
@@ -315,16 +351,18 @@ class PrefsDialog(QDialog):
 
 
 class CrowiaOverlay(QWidget):
-    text_submitted = pyqtSignal(str, list)
-    tts_toggled    = pyqtSignal(bool)
-    save_memory    = pyqtSignal()
-    export_summary = pyqtSignal()
-    skip_tts       = pyqtSignal()
+    text_submitted  = pyqtSignal(str, list)
+    tts_toggled     = pyqtSignal(bool)
+    save_memory     = pyqtSignal()
+    export_summary  = pyqtSignal()
+    skip_tts        = pyqtSignal()
+    hotkey_changed  = pyqtSignal(list)   # list[str] — new evdev key names
 
     def __init__(self, cfg: dict | None = None, on_cancel=None):
         super().__init__()
         self._prefs = prefs_mod.load()
         self._on_cancel = on_cancel
+        self._cfg = cfg or {}
 
         out_cfg = (cfg or {}).get("output", {})
         tts_default = out_cfg.get("tts_enabled", True)
@@ -688,7 +726,8 @@ class CrowiaOverlay(QWidget):
         self._fit()
 
     def _open_prefs_dialog(self):
-        dlg = PrefsDialog(self._prefs, parent=self)
+        current_keys = self._cfg.get("hotkey", {}).get("keys", [])
+        dlg = PrefsDialog(self._prefs, hotkey_keys=current_keys, parent=self)
         if dlg.exec() == QDialog.DialogCode.Accepted:
             new_prefs = dlg.result_prefs()
             tts_changed = new_prefs.get("tts_enabled") != self._prefs.get("tts_enabled")
@@ -701,3 +740,7 @@ class CrowiaOverlay(QWidget):
             prefs_mod.save(self._prefs)
             if tts_changed:
                 self.tts_toggled.emit(self._tts_enabled)
+            new_keys = dlg.hotkey_keys()
+            if new_keys != current_keys:
+                self._cfg.setdefault("hotkey", {})["keys"] = new_keys
+                self.hotkey_changed.emit(new_keys)

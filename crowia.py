@@ -417,6 +417,36 @@ def main():
         t = threading.Thread(target=_run_hotkey_listener, daemon=True)
         t.start()
 
+        def _on_hotkey_changed(new_keys: list):
+            nonlocal listener, t
+            log.info("Hotkey changed to: %s", new_keys)
+            listener.stop()
+            # Save to config.local.yaml
+            import yaml
+            local_path = PROJECT_ROOT / "config.local.yaml"
+            local_raw = {}
+            if local_path.exists():
+                with open(local_path, encoding="utf-8") as f:
+                    local_raw = yaml.safe_load(f) or {}
+            local_raw.setdefault("hotkey", {})["keys"] = new_keys
+            with open(local_path, "w", encoding="utf-8") as f:
+                yaml.dump(local_raw, f, allow_unicode=True)
+            cfg["hotkey"]["keys"] = new_keys
+            # Start new listener
+            new_listener = HotkeyListener(
+                key_names=new_keys,
+                mode=cfg["hotkey"]["mode"],
+                on_start=on_start,
+                on_stop=on_stop,
+            )
+            listener = new_listener
+            nt = threading.Thread(target=lambda: asyncio.run(new_listener.run()), daemon=True)
+            nt.start()
+            log.info("Hotkey listener restarted with: %s", new_keys)
+
+        if overlay:
+            overlay.hotkey_changed.connect(_on_hotkey_changed)
+
     if qt_app:
         import signal
         signal.signal(signal.SIGINT, lambda *_: qt_app.quit())
