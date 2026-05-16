@@ -6,10 +6,10 @@
 
 ## Quién soy
 
-Usuario: Vanjex (uzcateguijesusdev@gmail.com)
+Usuario: Vanjex (vanjexdev@gmail.com)
 Sistema host: CachyOS Linux + KDE Plasma 6 (Wayland), teclado Epomaker F75
 Shell: fish
-Repo: `vanjexdev/crowia` en GitHub (usando `github-vanjex` como remote)
+Repo: `vanjexdev/crowia` en GitHub (usando remote `origin` con host alias `github-vanjex`)
 
 ---
 
@@ -25,57 +25,70 @@ Repo: `vanjexdev/crowia` en GitHub (usando `github-vanjex` como remote)
 
 ---
 
-## Lo que hicimos en esta sesión
+## Lo que se hizo (sesiones anteriores)
 
 ### 1. giselo-doctor (`scripts/giselo-doctor`)
-Script Python ejecutable que:
+Script Python ejecutable:
 - Detecta OS (Arch/Debian/Fedora/macOS/Windows)
 - Verifica 10 dependencias con ✓/✗ y hints de instalación
 - Genera `config.local.yaml` con paths correctos para el OS actual
 
-`config.py` ahora deep-mergea `config.local.yaml` sobre `config.yaml` automáticamente.
+`config.py` deep-mergea `config.local.yaml` sobre `config.yaml` automáticamente.
 
-**Bug corregido:** `shutil.which("piper")` encontraba la app GTK antes que `piper-tts`. Swapped a `piper-tts` primero.
-
-**Bug corregido:** `~` en paths no se expande en subprocess. `output.py._speak()` ahora hace `Path(c).expanduser()` antes de Popen.
+**Bug corregido:** `shutil.which("piper")` encontraba la app GTK. Swapped a `piper-tts` primero.
+**Bug corregido:** `~` en paths no se expande en subprocess. `output.py._speak()` ahora hace `Path(c).expanduser()`.
 
 ### 2. Giselo Web (`crowia/server/` + `run_server.py`)
 PWA completa con acceso remoto vía Tailscale VPN:
 
 **Backend (FastAPI + WebSocket `/ws`):**
 - `POST /ask` — texto → LLM → JSON
-- `WebSocket /ws` — protocolo de mensajes JSON + binary:
-  - `voice_start` / binary chunks / `voice_end` → ffmpeg → Whisper → LLM → piper → WAV binary
-  - `text` → LLM → chunks streaming → WAV binary
-  - `clear_history`, `switch_backend`
-- `GET /api/status`, `GET/DELETE /api/history`
-- Config via `CROWIA_CONFIG` env var (set por `run_server.py --config`)
+- `WebSocket /ws` — voz + texto + TTS streaming
+- Config via `CROWIA_CONFIG` env var
 
 **Frontend (Material Design 3, vanilla JS):**
 - Desktop/tablet: navigation rail lateral
 - Mobile: bottom nav estilo Android + FAB micrófono central
-- `MediaRecorder` → WebM → WebSocket binary → Whisper
-- `Web Audio API` → reproduce WAV del servidor
-- `marked.js` → renderiza markdown en burbujas del asistente
-- Service worker → PWA offline shell
+- `MediaRecorder` → WebM → WebSocket → Whisper
+- Web Audio API reproduce WAV del servidor
+- `marked.js` renderiza markdown en burbujas
+- PWA instalable
+
+**Fixes TTS VM:**
+- `piper-tts` Python package no instala binario → fallback `PiperVoice.load() + synthesize_wav()`
+- WAV params deben setearse ANTES de llamar `synthesize_wav()`
 - `AudioContext.resume()` en gesture del usuario → bypass autoplay policy
 
-**Fixes TTS en la VM:**
-- `piper-tts` Python package no instala binario → `audio.py` detecta si binario existe, si no usa `PiperVoice.load() + synthesize_wav()`
-- `synthesize()` → 44 bytes (solo header WAV, sin audio) → cambiado a `synthesize_wav()`
-- WAV params deben setearse ANTES de llamar `synthesize_wav()`
+### 3. GitHub Pages landing site (`site/` → `docs/`)
+- Vite + Courvux framework (desde GitHub `vanjexdev/courvux`)
+- Material Design 3, vanilla JS, totalmente responsive
+- Hero: mockup CSS de teléfono + laptop con placeholders para GIFs
+- Secciones: Features (8 cards), How to Install (4 pasos), Footer
+- Navbar con blur al hacer scroll, botón Get Started alineado en móvil
+- Build: `npm run build` en `site/` → genera `docs/`
+- GH Pages: Settings → Pages → Deploy from branch → `main` / `/docs`
+- URL: `https://vanjexdev.github.io/crowia/`
 
-### 3. Instrucciones para instalación por OS
-README actualizado con secciones para Arch, Ubuntu, Fedora, macOS, Windows.
+**Para agregar GIFs:**
+- Poner archivo en `site/public/` (ej. `site/public/web-demo.gif`)
+- En `Hero.js` reemplazar `<div class="placeholder-media">` con `<img src="/crowia/web-demo.gif" alt="...">`
+- `npm run build` y commit de `docs/`
+
+### 4. Fixes de git/repo
+- Git config local del repo: `Vanjex <vanjexdev@gmail.com>` (antes heredaba global incorrecto)
+- Reescritura de los 70 commits del historial con autor correcto vía `git filter-branch`
+- Force push a `main` y `staging`
+- `config.local.yaml` removido del tracking (estaba trackeado a pesar del .gitignore)
+- `.gitignore` actualizado: `.venv-server/`, `*.crt`, `*.key`, `site/node_modules/`
 
 ---
 
 ## Estado actual de ramas
 
 ```
-main    ← pusheado, al día
+main    ← pusheado, al día (a89d2f7)
 staging ← pusheado, al día
-feat/giselo-doctor ← local, mergeada
+feat/giselo-doctor ← local, mergeada (historia reescrita)
 ```
 
 ---
@@ -114,27 +127,37 @@ output:
 
 ---
 
-## Pendientes / próximos pasos sugeridos
+## Pendientes / próximos pasos
 
+- [ ] Grabar GIFs del web app (móvil) y del overlay de escritorio → meter en `site/public/` y actualizar `Hero.js`
+- [ ] Configurar GH Pages en el repo: Settings → Pages → Deploy from branch → `main` / `/docs`
 - [ ] Logs de debug TTS en `app.py` y `app.js` — remover cuando audio esté confirmado estable
 - [ ] Iconos PWA reales (actualmente son placeholders morados generados con Python)
-- [ ] `config.server.yaml` no está en el repo (correcto, es local de la VM)
 - [ ] Certs Tailscale expiran — renovar con `sudo tailscale cert` cuando expire
 
 ---
 
-## Archivos clave modificados en esta sesión
+## Archivos clave
 
-| Archivo | Cambio |
-|---------|--------|
-| `crowia/config.py` | Merge de `config.local.yaml` |
-| `crowia/output.py` | Expandir `~` en tts_command, fallback Python API |
-| `crowia/intent.py` | Fix false positive TTS unmute ("habla" → frases completas) |
-| `scripts/giselo-doctor` | Nuevo — diagnóstico OS + config.local.yaml |
-| `run_server.py` | Nuevo — CLI del servidor web |
-| `crowia/server/app.py` | Nuevo — FastAPI + WebSocket |
-| `crowia/server/audio.py` | Nuevo — conversión audio + piper Python API |
-| `crowia/server/web/*` | Nuevo — PWA completa |
-| `README.md` | Instrucciones por OS + sección Giselo Web |
-| `.gitignore` | Nuevo |
-| `skills/crowia.md` | Nuevo — skill del proyecto |
+| Archivo | Descripción |
+|---------|-------------|
+| `crowia/config.py` | Merge config.yaml + config.local.yaml |
+| `crowia/output.py` | TTS con piper-tts, expandir ~, fallback Python API |
+| `crowia/server/app.py` | FastAPI + WebSocket, CROWIA_CONFIG env var |
+| `crowia/server/audio.py` | webm→wav (ffmpeg), tts→wav (piper Python API) |
+| `crowia/server/web/` | PWA: index.html, app.js, audio.js, style.css |
+| `scripts/giselo-doctor` | Diagnóstico OS + config.local.yaml |
+| `run_server.py` | CLI del servidor web |
+| `site/` | Fuente del landing page (Vite + Courvux) |
+| `docs/` | Build compilado → GitHub Pages |
+| `.github/workflows/pages.yml` | CI para GH Pages (opcional, también funciona con docs/ directo) |
+
+---
+
+## Archivos sensibles (NO committear)
+
+- `config.local.yaml` — paths locales del OS (ya está en .gitignore y desTrackeado)
+- `~/.config/crowia/google_credentials.json`
+- `~/.config/crowia/google_token.json`
+- Certs Tailscale (`*.crt`, `*.key`) — en .gitignore
+- `~/config.server.yaml` en la VM — no está en el repo

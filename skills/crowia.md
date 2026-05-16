@@ -11,6 +11,9 @@ crowia/
 ├── config.yaml            # Config principal
 ├── config.local.yaml      # Generado por giselo-doctor (ignorado en git)
 ├── scripts/giselo-doctor  # Detecta OS, escribe config.local.yaml
+├── site/                  # Fuente del landing page (Vite + Courvux)
+├── docs/                  # Build compilado → GitHub Pages
+├── .github/workflows/pages.yml  # CI deploy GH Pages
 └── crowia/
     ├── config.py          # load() — deep merge config.yaml + config.local.yaml
     ├── assistant.py       # ask() con on_chunk streaming, switch_backend()
@@ -39,6 +42,12 @@ crowia/
 .venv/bin/python3 run_server.py --port 8181 \
   --config ~/config.server.yaml \
   --ssl-cert ~/giselo.crt --ssl-key ~/giselo.key
+
+# Landing page (desarrollo)
+cd site && npm run dev
+
+# Landing page (build para GH Pages)
+cd site && npm run build  # genera docs/
 ```
 
 ## Backends disponibles
@@ -57,12 +66,16 @@ crowia/
 
 Flujo: `feat/x` → `staging` → `main`. No hacer push directo sin confirmar.
 
+**Git config local del repo:** `Vanjex <vanjexdev@gmail.com>` (seteado con `git config --local`).
+No heredar del global — el global tiene otro email.
+
 ## TTS (piper-tts)
 
 - **Host (CachyOS)**: binario en `/usr/bin/piper-tts`, modelo en `~/.local/share/piper/es_ES-davefx-medium.onnx`
 - **VM (Ubuntu Server)**: usa Python API `PiperVoice.load()` + `synthesize_wav()` — no binario, modelo accesible vía mount
 - `output.py._speak()` detecta si el cmd tiene `piper-tts` en `cmd[0]` → pipe a aplay
 - `server/audio.py.tts_to_wav_bytes()` → si binario no existe → fallback Python API
+- WAV params deben setearse ANTES de llamar `synthesize_wav()`
 
 ## Servidor Web PWA
 
@@ -72,6 +85,15 @@ Flujo: `feat/x` → `staging` → `main`. No hacer push directo sin confirmar.
 - Desktop/tablet: navigation rail lateral
 - Voz: `MediaRecorder` → WebM → ffmpeg → WAV → Whisper → LLM → piper → WAV → Web Audio API
 - HTTPS requerido para micrófono: `sudo tailscale cert <hostname>.ts.net`
+- `AudioContext.resume()` debe llamarse en gesture del usuario (autoplay policy)
+
+## Landing Page (GitHub Pages)
+
+- Fuente: `site/` — Vite + Courvux (`vanjexdev/courvux` de GitHub)
+- Output: `docs/` — commiteado al repo, sirve como GH Pages
+- URL: `https://vanjexdev.github.io/crowia/`
+- Config GH Pages: Settings → Pages → Deploy from branch → `main` / `/docs`
+- Para agregar GIFs: poner en `site/public/`, reemplazar `placeholder-media` en `site/src/components/Hero.js`, hacer build y commitear `docs/`
 
 ## VM Ubuntu Server (Tailscale)
 
@@ -86,7 +108,7 @@ Flujo: `feat/x` → `staging` → `main`. No hacer push directo sin confirmar.
 
 ## Config importante
 
-- `config.local.yaml` se genera con `./scripts/giselo-doctor` — no editar a mano
+- `config.local.yaml` se genera con `./scripts/giselo-doctor` — no editar a mano, no committear
 - Para la VM usar `~/config.server.yaml` aparte (no se sube al repo)
 - `CROWIA_CONFIG` env var overridea el path de config en `app.py`
 
@@ -103,7 +125,8 @@ Flujo: `feat/x` → `staging` → `main`. No hacer push directo sin confirmar.
 
 ## Archivos sensibles (NO committear)
 
-- `config.local.yaml` — paths locales del OS
+- `config.local.yaml` — paths locales del OS (ya desTrackeado)
 - `~/.config/crowia/google_credentials.json`
 - `~/.config/crowia/google_token.json`
 - Certs Tailscale (`*.crt`, `*.key`)
+- `~/config.server.yaml` en la VM
