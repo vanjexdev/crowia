@@ -2,5 +2,11 @@ __pycache__/
 *.pyc
 *.pyo
 .venv/
+.venv-server/
 config.local.yaml
 image.png
+# site
+site/node_modules/
+# certs
+*.crt
+*.key
