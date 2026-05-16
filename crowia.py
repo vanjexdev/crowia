@@ -130,6 +130,7 @@ def main():
         overlay._on_cancel = on_cancel
         overlay.set_backend(assistant.current_backend_name)
         overlay.tts_toggled.connect(output.set_tts)
+        overlay.skip_tts.connect(output.stop_tts)
         output.set_tts(overlay._tts_enabled)  # sync prefs → output on startup
 
     history_cfg = cfg.get("history", {})

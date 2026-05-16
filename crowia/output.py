@@ -30,6 +30,16 @@ class OutputHandler:
         self.tts_enabled = out["tts_enabled"]
         self.tts_command = out["tts_command"]
         self._last_notif_id: str | None = None
+        self._tts_lock = __import__("threading").Lock()
+        self._piper_proc: subprocess.Popen | None = None
+        self._aplay_proc: subprocess.Popen | None = None
+
+    def stop_tts(self):
+        with self._tts_lock:
+            if self._aplay_proc and self._aplay_proc.poll() is None:
+                self._aplay_proc.kill()
+            if self._piper_proc and self._piper_proc.poll() is None:
+                self._piper_proc.kill()
 
     def show_status(self, message: str):
         args = [
@@ -108,6 +118,9 @@ class OutputHandler:
                     stdin=piper_proc.stdout,
                     stderr=subprocess.DEVNULL,
                 )
+                with self._tts_lock:
+                    self._piper_proc = piper_proc
+                    self._aplay_proc = aplay_proc
                 piper_proc.stdin.write(text.encode())
                 piper_proc.stdin.close()
                 piper_proc.stdout.close()
@@ -115,6 +128,10 @@ class OutputHandler:
                 piper_proc.wait(timeout=5)
             except Exception as e:
                 log.warning("piper TTS failed: %s", e)
+            finally:
+                with self._tts_lock:
+                    self._piper_proc = None
+                    self._aplay_proc = None
         else:
             try:
                 subprocess.run(

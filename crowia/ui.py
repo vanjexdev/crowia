@@ -319,6 +319,7 @@ class CrowiaOverlay(QWidget):
     tts_toggled    = pyqtSignal(bool)
     save_memory    = pyqtSignal()
     export_summary = pyqtSignal()
+    skip_tts       = pyqtSignal()
 
     def __init__(self, cfg: dict | None = None, on_cancel=None):
         super().__init__()
@@ -396,6 +397,14 @@ class CrowiaOverlay(QWidget):
         self._cancel_btn.clicked.connect(self._on_cancel_clicked)
         self._cancel_btn.hide()
         left_btns.addWidget(self._cancel_btn)
+
+        self._skip_btn = QPushButton("⏭")
+        self._skip_btn.setToolTip("Saltar audio")
+        self._skip_btn.setStyleSheet(_btn_style(160, 100, 20))
+        self._skip_btn.setFixedSize(34, 30)
+        self._skip_btn.clicked.connect(self.skip_tts)
+        self._skip_btn.hide()
+        left_btns.addWidget(self._skip_btn)
 
         left_btns.addStretch()
 
@@ -497,11 +506,16 @@ class CrowiaOverlay(QWidget):
         if state in ("recording", "processing"):
             self._bars.start()
             self._cancel_btn.show()
+            self._skip_btn.hide()
         else:
             self._bars.stop()
             self._cancel_btn.hide()
         if state == "done":
+            if self._tts_enabled:
+                self._skip_btn.show()
             QTimer.singleShot(3000, lambda: self._apply_state("idle"))
+        if state == "idle":
+            self._skip_btn.hide()
         self.show()
         self._fit()
 
