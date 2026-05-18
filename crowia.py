@@ -129,9 +129,18 @@ def main():
     if overlay:
         overlay._on_cancel = on_cancel
         overlay.set_backend(assistant.current_backend_name)
+        cfg["_active_backend"] = assistant._active_id
         overlay.tts_toggled.connect(output.set_tts)
         overlay.skip_tts.connect(output.stop_tts)
         output.set_tts(overlay._tts_enabled)  # sync prefs → output on startup
+
+        def _on_backend_changed(backend_id: str):
+            msg = assistant.switch_backend(backend_id)
+            cfg["_active_backend"] = assistant._active_id
+            overlay.set_backend(assistant.current_backend_name)
+            output.show("Giselo", msg)
+
+        overlay.backend_changed.connect(_on_backend_changed)
 
     history_cfg = cfg.get("history", {})
     history = ConversationHistory(
@@ -159,6 +168,7 @@ def main():
         """Handle quick intents. Returns True if handled (skip LLM)."""
         if intents.switch_backend:
             msg = assistant.switch_backend(intents.switch_backend)
+            cfg["_active_backend"] = assistant._active_id
             if overlay:
                 overlay.set_backend(assistant.current_backend_name)
             output.show("Giselo", msg)

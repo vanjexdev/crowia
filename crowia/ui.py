@@ -14,7 +14,7 @@ except ImportError:
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, pyqtSlot, QObject
 from PyQt6.QtGui import QPixmap, QPainter, QColor, QFont
 from PyQt6.QtWidgets import (
-    QApplication, QCheckBox, QDialog, QDialogButtonBox,
+    QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
     QHBoxLayout, QLabel, QLineEdit, QMenu, QPlainTextEdit, QPushButton,
     QSplitter, QTextBrowser, QVBoxLayout, QWidget,
 )
@@ -272,7 +272,10 @@ class TextInputPanel(QWidget):
 
 
 class PrefsDialog(QDialog):
-    def __init__(self, prefs: dict, hotkey_keys: list[str], parent=None):
+    def __init__(self, prefs: dict, hotkey_keys: list[str],
+                 backends: list[dict] | None = None,
+                 current_backend: str = "",
+                 parent=None):
         super().__init__(parent)
         self.setWindowTitle("Giselo — Preferencias")
         self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
@@ -282,6 +285,21 @@ class PrefsDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.setSpacing(12)
         layout.setContentsMargins(20, 20, 20, 20)
+
+        # ── Backend selector ────────────────────────────────────────────────
+        if backends:
+            layout.addWidget(QLabel("Backend activo:"))
+            self._backend_combo = QComboBox()
+            for entry in backends:
+                self._backend_combo.addItem(entry.get("label", entry["id"]), entry["id"])
+            # Select current
+            for i in range(self._backend_combo.count()):
+                if self._backend_combo.itemData(i) == current_backend:
+                    self._backend_combo.setCurrentIndex(i)
+                    break
+            layout.addWidget(self._backend_combo)
+        else:
+            self._backend_combo = None
 
         self._cb_text = QCheckBox("Mostrar respuesta en texto")
         self._cb_text.setChecked(prefs.get("show_response_text", True))
@@ -341,6 +359,11 @@ class PrefsDialog(QDialog):
     def hotkey_keys(self) -> list[str]:
         return [k.strip() for k in self._hotkey_edit.text().split(",") if k.strip()]
 
+    def selected_backend(self) -> str | None:
+        if self._backend_combo is None:
+            return None
+        return self._backend_combo.currentData()
+
     def result_prefs(self) -> dict:
         return {
             **self._prefs,
@@ -357,6 +380,7 @@ class CrowiaOverlay(QWidget):
     export_summary  = pyqtSignal()
     skip_tts        = pyqtSignal()
     hotkey_changed  = pyqtSignal(list)   # list[str] — new evdev key names
+    backend_changed = pyqtSignal(str)    # backend id
 
     def __init__(self, cfg: dict | None = None, on_cancel=None):
         super().__init__()
@@ -726,8 +750,19 @@ class CrowiaOverlay(QWidget):
         self._fit()
 
     def _open_prefs_dialog(self):
+        from .registry import BackendRegistry
+        registry = BackendRegistry()
+        backends = registry.enabled_sorted()
+        current_backend = self._cfg.get("_active_backend", "")
+
         current_keys = self._cfg.get("hotkey", {}).get("keys", [])
-        dlg = PrefsDialog(self._prefs, hotkey_keys=current_keys, parent=self)
+        dlg = PrefsDialog(
+            self._prefs,
+            hotkey_keys=current_keys,
+            backends=backends,
+            current_backend=current_backend,
+            parent=self,
+        )
         if dlg.exec() == QDialog.DialogCode.Accepted:
             new_prefs = dlg.result_prefs()
             tts_changed = new_prefs.get("tts_enabled") != self._prefs.get("tts_enabled")
@@ -744,3 +779,7 @@ class CrowiaOverlay(QWidget):
             if new_keys != current_keys:
                 self._cfg.setdefault("hotkey", {})["keys"] = new_keys
                 self.hotkey_changed.emit(new_keys)
+            new_backend = dlg.selected_backend()
+            if new_backend and new_backend != current_backend:
+                self._cfg["_active_backend"] = new_backend
+                self.backend_changed.emit(new_backend)
