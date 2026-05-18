@@ -50,7 +50,8 @@ class MoonshotBackend(Backend):
             for msg in history[-10:]:
                 role = msg.get("role", "user")
                 content = msg["content"] if isinstance(msg["content"], str) else str(msg["content"])
-                messages.append({"role": role, "content": content})
+                if content.strip():
+                    messages.append({"role": role, "content": content})
 
         user_content = ""
         if file_paths:
