@@ -30,10 +30,12 @@ class GiseloApp {
     document.getElementById('app').classList.remove('hidden');
     this._bindNav();
     this._bindChat();
-    this._bindSettings();
     this._connect();
     this._registerSW();
-    this._loadStatus();
+    this._loadBackends().then(() => {
+      this._bindSettings();
+      this._loadStatus();
+    });
   }
 
   // ── Auth ────────────────────────────────────────────────────────────────
@@ -106,6 +108,24 @@ class GiseloApp {
     localStorage.removeItem(TOKEN_KEY);
     this._token = '';
     location.reload();
+  }
+
+  async _loadBackends() {
+    try {
+      const r = await fetch('/api/backends', { headers: this._authHeaders() });
+      if (!r.ok) return;
+      const backends = await r.json();
+      const container = document.getElementById('backend-selector');
+      if (!container) return;
+      container.innerHTML = '';
+      backends.forEach(({ id, label }) => {
+        const btn = document.createElement('button');
+        btn.className = 'backend-btn';
+        btn.dataset.backend = id;
+        btn.textContent = label;
+        container.appendChild(btn);
+      });
+    } catch (_) {}
   }
 
   async _loadStatus() {

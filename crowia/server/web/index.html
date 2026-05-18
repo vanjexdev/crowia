@@ -127,10 +127,8 @@
     <!-- ── Settings View ── -->
     <div class="view" id="view-settings">
       <div class="section-header">Backend</div>
-      <div class="backend-selector">
-        <button class="backend-btn active" data-backend="claude">Claude</button>
-        <button class="backend-btn" data-backend="opencode">OpenCode</button>
-        <button class="backend-btn" data-backend="codex">Codex</button>
+      <div class="backend-selector" id="backend-selector">
+        <!-- populated dynamically from /api/backends -->
       </div>
 
       <div class="section-header">Audio</div>

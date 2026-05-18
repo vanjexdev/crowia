@@ -155,6 +155,14 @@ async def status():
     })
 
 
+@app.get("/api/backends", dependencies=[Depends(require_auth)])
+async def list_backends():
+    return JSONResponse([
+        {"id": e["id"], "label": e.get("label", e["id"])}
+        for e in assistant.registry.enabled_sorted()
+    ])
+
+
 # ── WebSocket ─────────────────────────────────────────────────────────────────
 
 @app.websocket("/ws")
