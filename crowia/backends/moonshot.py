@@ -6,8 +6,8 @@ from .base import Backend
 
 log = logging.getLogger(__name__)
 
-_BASE_URL = "https://api.moonshot.ai/v1"
-_DEFAULT_MODEL = "kimi-k2.6"
+_BASE_URL = "https://api.kimi.com/coding/v1"
+_DEFAULT_MODEL = "kimi-for-coding"
 
 
 class MoonshotBackend(Backend):
@@ -15,7 +15,7 @@ class MoonshotBackend(Backend):
     Moonshot (Kimi) API backend — OpenAI-compatible REST API.
 
     Registry entry fields:
-      model    — kimi-k2.6 (default: kimi-k2.6)
+      model    — kimi-for-coding (default: kimi-for-coding)
       api_key  — leave empty to use MOONSHOT_API_KEY env var
     """
 
