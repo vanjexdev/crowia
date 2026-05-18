@@ -6,7 +6,7 @@ from .base import Backend
 
 log = logging.getLogger(__name__)
 
-_BASE_URL = "https://moonshot.ai"
+_BASE_URL = "https://api.moonshot.ai/v1"
 _DEFAULT_MODEL = "kimi-k2.6"
 
 
