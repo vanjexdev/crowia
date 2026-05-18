@@ -6,8 +6,8 @@ from .base import Backend
 
 log = logging.getLogger(__name__)
 
-_BASE_URL = "https://api.kimi.com/coding/v1"
-_DEFAULT_MODEL = "kimi-for-coding"
+_BASE_URL = "https://api.moonshot.cn/v1"
+_DEFAULT_MODEL = "moonshot-v1-8k"
 
 
 class MoonshotBackend(Backend):
@@ -15,14 +15,14 @@ class MoonshotBackend(Backend):
     Moonshot (Kimi) API backend — OpenAI-compatible REST API.
 
     Registry entry fields:
-      model    — kimi-for-coding (default: kimi-for-coding)
+      model    — moonshot-v1-8k | moonshot-v1-32k | moonshot-v1-128k (default: moonshot-v1-8k)
       api_key  — leave empty to use MOONSHOT_API_KEY env var
     """
 
     def __init__(self, _cfg: dict, entry: dict):
         self.name = entry.get("label", "Kimi")
         self._model = entry.get("model", _DEFAULT_MODEL)
-        self._api_key = entry.get("api_key", "") or os.environ.get("KIMI_API_KEY", "")
+        self._api_key = entry.get("api_key", "") or os.environ.get("MOONSHOT_API_KEY", "")
         self._client = None
 
     def _get_client(self):
@@ -32,12 +32,8 @@ class MoonshotBackend(Backend):
             except ImportError:
                 raise RuntimeError("openai package not installed. Run: pip install openai")
             if not self._api_key:
-                raise RuntimeError("KIMI_API_KEY no configurada. Exporta la variable o agrega api_key al registry.")
-            self._client = OpenAI(
-                api_key=self._api_key,
-                base_url=_BASE_URL,
-                default_headers={"User-Agent": "kimi-cli/1.0"},
-            )
+                raise RuntimeError("MOONSHOT_API_KEY no configurada. Exporta la variable o agrega api_key al registry.")
+            self._client = OpenAI(api_key=self._api_key, base_url=_BASE_URL)
         return self._client
 
     def cancel(self) -> None:
@@ -119,7 +115,7 @@ class MoonshotBackend(Backend):
             log.error("Moonshot error: %s", exc)
             msg = str(exc).lower()
             if "401" in msg or "unauthorized" in msg or "api key" in msg:
-                return "[crowia] Kimi API key inválida. Verifica KIMI_API_KEY."
+                return "[crowia] Moonshot API key inválida. Verifica MOONSHOT_API_KEY."
             if "rate" in msg or "429" in msg:
                 return f"[crowia] rate limit Moonshot (429)"
             return f"[crowia] Error de Moonshot: {exc}"
