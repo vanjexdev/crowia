@@ -45,8 +45,8 @@ def main():
                         help="List keyboard input devices and exit")
     parser.add_argument("--always-on", action="store_true",
                         help="Always-on mode: wake word + VAD (no hotkey needed)")
-    parser.add_argument("--backend", choices=["claude", "opencode", "codex"],
-                        help="Override backend from config (claude|opencode|codex)")
+    parser.add_argument("--backend",
+                        help="Override backend from config (any registered backend id)")
     parser.add_argument("--hotkey",
                         help="Override hotkey combo, comma-separated evdev names "
                              "(e.g. KEY_LEFTCTRL,KEY_LEFTSHIFT,KEY_LEFTALT,KEY_1)")
