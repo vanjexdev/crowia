@@ -8,16 +8,26 @@ import anthropic
 from .backends.base import Backend
 from .backends.claude_cli import ClaudeCliBackend
 from .backends.codex import CodexBackend
+from .backends.generic_cli import GenericCliBackend
 from .backends.opencode import OpenCodeBackend
+from .registry import BackendRegistry
 from . import skills as skills_mod
 
 log = logging.getLogger(__name__)
 
-BACKENDS = {
-    "claude": ClaudeCliBackend,
-    "codex": CodexBackend,
-    "opencode": OpenCodeBackend,
+# Kept for switch_backend("name") backward compat when id not in registry
+_BUILTIN: dict[str, type] = {
+    "claude":    ClaudeCliBackend,
+    "codex":     CodexBackend,
+    "opencode":  OpenCodeBackend,
 }
+
+_FAILOVER_TRIGGERS = frozenset([
+    "rate limit", "rate_limit", "ratelimit",
+    "too many requests", "overloaded",
+    "quota exceeded", "usage limit",
+    "429", "503",
+])
 
 
 class Assistant:
@@ -33,16 +43,35 @@ class Assistant:
         self._api_client: anthropic.Anthropic | None = None
         self._vision_model = cfg["claude"].get("model", "claude-sonnet-4-6")
 
-        default_backend = cfg.get("backend", "claude")
-        self._backend: Backend = self._build(default_backend)
+        self._registry = BackendRegistry()
+        self._active_id: str = cfg.get("backend", "claude")
+        self._backend: Backend = self._build_by_id(self._active_id)
+        self._failover_tried: set[str] = set()
         log.info("Backend activo: %s", self._backend.name)
 
-    def _build(self, name: str) -> Backend:
-        cls = BACKENDS.get(name.lower())
-        if cls is None:
-            log.warning("Backend '%s' desconocido, usando claude.", name)
-            cls = ClaudeCliBackend
-        return cls(self._cfg)
+    # ------------------------------------------------------------------ build
+
+    def _build_by_id(self, backend_id: str) -> Backend:
+        entry = self._registry.get(backend_id)
+        if entry:
+            return self._build_entry(entry)
+        cls = _BUILTIN.get(backend_id.lower())
+        if cls:
+            return cls(self._cfg)
+        log.warning("Backend '%s' desconocido, usando claude.", backend_id)
+        return ClaudeCliBackend(self._cfg)
+
+    def _build_entry(self, entry: dict) -> Backend:
+        btype = entry.get("type", "generic_cli")
+        if btype == "claude_cli":
+            return ClaudeCliBackend(self._cfg)
+        if btype == "codex":
+            return CodexBackend(self._cfg)
+        if btype == "opencode":
+            return OpenCodeBackend(self._cfg)
+        return GenericCliBackend(self._cfg, entry)
+
+    # ------------------------------------------------------------------ prompt
 
     def set_memory_context(self, memory_text: str) -> None:
         self._memory_text = memory_text
@@ -57,6 +86,8 @@ class Assistant:
         if skill_text:
             parts.append(skill_text)
         return "\n\n".join(parts)
+
+    # ------------------------------------------------------------------ skills
 
     def _find_skill(self, name: str) -> str | None:
         name_low = name.lower()
@@ -76,7 +107,6 @@ class Assistant:
             return f"Skill '{match}' ya estaba activa."
         self._enabled_skills.append(match)
         self.system_prompt = self._build_prompt()
-        log.info("Skill activada: %s", match)
         return f"Skill '{match}' activada."
 
     def disable_skill(self, name: str) -> str:
@@ -87,7 +117,6 @@ class Assistant:
             return f"Skill '{match}' ya estaba desactivada."
         self._enabled_skills.remove(match)
         self.system_prompt = self._build_prompt()
-        log.info("Skill desactivada: %s", match)
         return f"Skill '{match}' desactivada."
 
     def list_skills(self) -> str:
@@ -95,20 +124,67 @@ class Assistant:
         disabled = ", ".join(s for s in self._available_skills if s not in self._enabled_skills) or "ninguna"
         return f"Skills activas: {enabled}. Desactivadas: {disabled}."
 
+    # ------------------------------------------------------------------ control
+
     def cancel(self) -> None:
         self._backend.cancel()
 
     def switch_backend(self, name: str) -> str:
         name = name.lower().strip()
-        if name not in BACKENDS:
-            return f"Backend '{name}' no disponible. Opciones: {', '.join(BACKENDS)}"
-        self._backend = self._build(name)
+        entry = self._registry.get(name)
+        if entry is None and name not in _BUILTIN:
+            available = ", ".join(self._registry.ids())
+            return f"Backend '{name}' no disponible. Registrados: {available}"
+        self._active_id = name
+        self._backend = self._build_by_id(name)
+        self._failover_tried.clear()
         log.info("Backend cambiado a: %s", self._backend.name)
         return f"Ahora uso {self._backend.name}."
 
     @property
     def current_backend_name(self) -> str:
         return self._backend.name
+
+    @property
+    def registry(self) -> BackendRegistry:
+        return self._registry
+
+    # ------------------------------------------------------------------ failover
+
+    def _is_rate_limit(self, response: str) -> bool:
+        r = response.lower()
+        return any(p in r for p in _FAILOVER_TRIGGERS)
+
+    def _failover_ask(self, text, history, image_path, file_paths, on_chunk) -> str:
+        self._failover_tried.add(self._active_id)
+        candidates = [
+            e for e in self._registry.enabled_sorted()
+            if e["id"] not in self._failover_tried
+        ]
+        if not candidates:
+            return "[crowia] Todos los backends alcanzaron su límite. Sin respuesta."
+
+        next_entry = candidates[0]
+        old_name = self._backend.name
+        self._active_id = next_entry["id"]
+        self._backend = self._build_entry(next_entry)
+        log.warning("Failover automático: %s → %s", old_name, self._backend.name)
+
+        response = self._backend.ask(
+            text=text,
+            system_prompt=self.system_prompt,
+            history=history,
+            file_paths=file_paths,
+            timeout=self.timeout,
+            on_chunk=on_chunk,
+        )
+
+        if self._is_rate_limit(response):
+            return self._failover_ask(text, history, image_path, file_paths, on_chunk)
+
+        return f"[Límite alcanzado en {old_name}, respondiendo con {self._backend.name}]\n\n{response}"
+
+    # ------------------------------------------------------------------ ask
 
     def ask(
         self,
@@ -120,7 +196,8 @@ class Assistant:
     ) -> str:
         if image_path and image_path.exists():
             return self._ask_vision_api(text, history, image_path, file_paths)
-        return self._backend.ask(
+
+        response = self._backend.ask(
             text=text,
             system_prompt=self.system_prompt,
             history=history,
@@ -128,6 +205,14 @@ class Assistant:
             timeout=self.timeout,
             on_chunk=on_chunk,
         )
+
+        if self._is_rate_limit(response):
+            return self._failover_ask(text, history, image_path, file_paths, on_chunk)
+
+        self._failover_tried.clear()
+        return response
+
+    # ------------------------------------------------------------------ vision
 
     def _client(self) -> anthropic.Anthropic:
         if self._api_client is None:
@@ -147,8 +232,8 @@ class Assistant:
                 try:
                     file_text = fp.read_text(encoding="utf-8", errors="replace")
                     content.append({"type": "text", "text": f"[Archivo: {fp}]\n```\n{file_text}\n```\n"})
-                except Exception as e:
-                    log.warning("Cannot read %s: %s", fp, e)
+                except Exception as exc:
+                    log.warning("Cannot read %s: %s", fp, exc)
         content.append({"type": "text", "text": text})
         messages = list(history or []) + [{"role": "user", "content": content}]
         try:
@@ -164,6 +249,6 @@ class Assistant:
             return result
         except anthropic.APITimeoutError:
             return f"[crowia] Claude tardó demasiado ({self.timeout}s)."
-        except anthropic.APIError as e:
-            log.error("API error: %s", e)
-            return f"[crowia] Error de API: {e}"
+        except anthropic.APIError as exc:
+            log.error("API error: %s", exc)
+            return f"[crowia] Error de API: {exc}"
