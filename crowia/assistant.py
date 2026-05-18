@@ -9,6 +9,7 @@ from .backends.base import Backend
 from .backends.claude_cli import ClaudeCliBackend
 from .backends.codex import CodexBackend
 from .backends.generic_cli import GenericCliBackend
+from .backends.moonshot import MoonshotBackend
 from .backends.opencode import OpenCodeBackend
 from .registry import BackendRegistry
 from . import skills as skills_mod
@@ -69,6 +70,8 @@ class Assistant:
             return CodexBackend(self._cfg)
         if btype == "opencode":
             return OpenCodeBackend(self._cfg)
+        if btype == "moonshot":
+            return MoonshotBackend(self._cfg, entry)
         return GenericCliBackend(self._cfg, entry)
 
     # ------------------------------------------------------------------ prompt
