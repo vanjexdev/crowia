@@ -28,7 +28,18 @@ INSTANCES_FILE = pathlib.Path.home() / ".config/crowia/instances.json"
 CROWIA_SCRIPT  = pathlib.Path(__file__).parent / "crowia.py"
 PYTHON         = pathlib.Path(__file__).parent / ".venv/bin/python3"
 
-BACKENDS = ["claude", "opencode", "codex"]
+def _load_backend_ids() -> list[dict]:
+    try:
+        sys.path.insert(0, str(pathlib.Path(__file__).parent))
+        from crowia.registry import BackendRegistry
+        registry = BackendRegistry()
+        return [{"id": e["id"], "label": e.get("label", e["id"])} for e in registry.enabled_sorted()]
+    except Exception:
+        return [
+            {"id": "claude",    "label": "Claude CLI"},
+            {"id": "opencode",  "label": "OpenCode"},
+            {"id": "codex",     "label": "Codex"},
+        ]
 
 # (label_visible, evdev_string)
 HOTKEY_SUGGESTIONS = [
@@ -113,9 +124,11 @@ class CreateDialog(QDialog):
         layout.addRow("Nombre:", self._name)
 
         self._backend = QComboBox()
-        self._backend.addItems(BACKENDS)
+        backends = _load_backend_ids()
+        for entry in backends:
+            self._backend.addItem(entry["label"], entry["id"])
         if existing:
-            idx = BACKENDS.index(existing["backend"]) if existing["backend"] in BACKENDS else 0
+            idx = next((i for i in range(self._backend.count()) if self._backend.itemData(i) == existing["backend"]), 0)
             self._backend.setCurrentIndex(idx)
         layout.addRow("Backend:", self._backend)
 
@@ -169,7 +182,7 @@ class CreateDialog(QDialog):
             hotkey = current_text  # custom typed evdev string
         return {
             "name": name,
-            "backend": self._backend.currentText(),
+            "backend": self._backend.currentData(),
             "hotkey": hotkey,
         }
 
