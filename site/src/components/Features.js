@@ -19,8 +19,8 @@ const FEATURES = [
     },
     {
         icon: 'smart_toy',
-        title: 'Multi-Backend',
-        desc: 'Switch between Claude CLI, OpenCode, and Codex by voice. Say "usa claude" or "usa opencode" to change on the fly.',
+        title: 'Multi-Backend + Auto-Failover',
+        desc: 'Registry of backends (Claude, OpenCode, Codex, Moonshot/Kimi, any custom CLI). Switch by voice or UI. Automatically falls back to the next backend when rate limits hit — same context, zero interruption.',
         color: '#B5EAD7',
     },
     {
@@ -37,8 +37,8 @@ const FEATURES = [
     },
     {
         icon: 'history',
-        title: 'Conversation History',
-        desc: 'Persistent JSON history with instant replay in the overlay. Clear with a voice command or a button click.',
+        title: 'Persistent Memory',
+        desc: '3-layer memory system: session history, per-session summaries, and long-term memory injected into every prompt. Giselo remembers context across restarts.',
         color: '#C7CEEA',
     },
     {

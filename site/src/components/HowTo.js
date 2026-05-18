@@ -1,44 +1,44 @@
 const STEPS = [
     {
         n: 1,
-        title: 'Clone & Setup',
-        desc: 'Clone the repository and run the setup script to create the Python virtual environment.',
+        title: 'One-line install',
+        desc: 'Run the installer — it detects your OS, installs dependencies, clones the repo, sets up a Python venv, and creates the giselo command.',
         code: [
-            { type: 'comment', text: '# Clone the repo' },
-            { type: 'cmd',  text: 'git', args: ' clone https://github.com/vanjexdev/crowia' },
-            { type: 'cmd',  text: 'cd', args: ' crowia' },
-            { type: 'cmd',  text: './setup.sh', args: '' },
+            { type: 'comment', text: '# Linux (pacman / apt / dnf) + macOS (brew)' },
+            { type: 'cmd', text: 'curl', args: ' -L https://raw.githubusercontent.com/vanjexdev/crowia/main/install.sh', flag: ' | bash' },
         ],
     },
     {
         n: 2,
-        title: 'Run giselo-doctor',
-        desc: 'The doctor checks all dependencies and auto-generates a config tailored to your OS and paths.',
+        title: 'Authenticate your LLM',
+        desc: 'Log in to the CLI backend(s) you want to use. Claude CLI uses OAuth — free with your subscription.',
         code: [
-            { type: 'comment', text: '# Diagnose + configure' },
-            { type: 'cmd', text: './scripts/giselo-doctor', args: '' },
+            { type: 'comment', text: '# Claude CLI (OAuth, no API key needed)' },
+            { type: 'cmd', text: 'claude', args: ' login' },
+            { type: 'comment', text: '# Optional: Moonshot/Kimi API key' },
+            { type: 'cmd', text: 'export', args: ' MOONSHOT_API_KEY=sk-...' },
         ],
     },
     {
         n: 3,
         title: 'Launch Giselo',
-        desc: 'Start the desktop assistant with hotkey mode or always-on wake word.',
+        desc: 'Start the desktop overlay with hotkey mode, always-on wake word, or use the multi-instance launcher.',
         code: [
-            { type: 'comment', text: '# Hotkey mode (Ctrl+Space by default)' },
-            { type: 'cmd', text: '.venv/bin/python3', args: ' crowia.py' },
-            { type: 'comment', text: '# Always-on wake word' },
-            { type: 'cmd', text: '.venv/bin/python3', args: ' crowia.py', flag: ' --always-on' },
+            { type: 'comment', text: '# Desktop overlay (hotkey mode)' },
+            { type: 'cmd', text: 'giselo', args: '' },
+            { type: 'comment', text: '# Always-on wake word ("oye giselo")' },
+            { type: 'cmd', text: 'giselo', args: ' --always-on' },
+            { type: 'comment', text: '# Multi-instance launcher' },
+            { type: 'cmd', text: 'giselo-launcher', args: '' },
         ],
     },
     {
         n: 4,
         title: 'Optional: Web App',
-        desc: 'Run the FastAPI server to access Giselo from any device on your Tailscale VPN.',
+        desc: 'Run the FastAPI server to access Giselo from any device on your network. Installable as a PWA.',
         code: [
-            { type: 'comment', text: '# Server with HTTPS (required for mic access)' },
-            { type: 'cmd', text: '.venv/bin/python3', args: ' run_server.py', flag: ' --port 8181 \\' },
-            { type: 'str',  text: '  --ssl-cert ~/giselo.crt', args: ' \\' },
-            { type: 'str',  text: '  --ssl-key ~/giselo.key', args: '' },
+            { type: 'comment', text: '# Web app (PWA, works on mobile)' },
+            { type: 'cmd', text: 'giselo', args: ' web' },
         ],
     },
 ];
@@ -53,7 +53,7 @@ export default {
                 </span>
                 <h2 class="headline-large">Up and running<br>in minutes</h2>
                 <p class="body-large howto-sub">
-                    giselo-doctor handles OS detection, dependency checks, and config generation automatically.
+                    One curl command installs everything. The launcher manages multiple instances with different backends and hotkeys.
                 </p>
             </div>
 

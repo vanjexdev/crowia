@@ -28,7 +28,7 @@ export default {
 
                 <p class="body-large hero-sub">
                     Giselo is an open-source, privacy-first voice assistant that runs entirely on your machine.
-                    Powered by Claude, OpenCode, or Codex — no data leaves your computer.
+                    Powered by Claude, OpenCode, Codex, Moonshot/Kimi, or any custom CLI — switches backends automatically when rate limits hit.
                 </p>
 
                 <!-- CTAs -->
@@ -37,8 +37,8 @@ export default {
                         <span class="material-symbols-rounded">code</span>
                         View on GitHub
                     </a>
-                    <a href="#features" class="btn btn-outlined">
-                        See features
+                    <a href="#install" class="btn btn-outlined">
+                        Install in one line
                         <span class="material-symbols-rounded">arrow_downward</span>
                     </a>
                 </div>
