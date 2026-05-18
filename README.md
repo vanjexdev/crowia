@@ -44,7 +44,7 @@ Di "oye giselo", "hey giselo" o "giselo" para activar. El siguiente utterance va
 
 | Flag | Descripción |
 |------|-------------|
-| `--backend claude\|opencode\|codex` | Override del backend desde config al arrancar |
+| `--backend <id>` | Override del backend al arrancar (cualquier id registrado en `~/.config/crowia/backends.yaml`) |
 | `--hotkey "KEY_A,KEY_B,KEY_C"` | Override de la combinación de teclas (nombres evdev separados por coma) |
 | `--always-on` | Activa modo siempre activo con wake word |
 | `--list-devices` | Lista dispositivos de entrada disponibles |
@@ -79,23 +79,37 @@ Di "oye giselo", "hey giselo" o "giselo" para activar. El siguiente utterance va
 
 ## Instalación
 
-### Pasos comunes (todos los OS)
+### Un comando (Linux / macOS)
+
+```bash
+curl -L https://raw.githubusercontent.com/vanjexdev/crowia/main/install.sh | bash
+```
+
+Instala dependencias del sistema, clona el repo, crea el venv, y crea el comando `giselo` en `~/.local/bin/`.
+
+```bash
+giselo              # app de escritorio
+giselo web          # servidor web (PWA)
+giselo --always-on  # modo siempre activo (wake word)
+giselo update       # actualizar a la última versión
+```
+
+---
+
+### Manual (todos los OS)
 
 ```bash
 # 1. Clonar repo
-git clone <repo-url> crowia && cd crowia
+git clone https://github.com/vanjexdev/crowia && cd crowia
 
 # 2. Venv y dependencias Python
-python3 -m venv --system-site-packages .venv
-.venv/bin/pip install faster-whisper anthropic sounddevice webrtcvad-wheels numpy
+python3 -m venv .venv
+.venv/bin/pip install faster-whisper anthropic sounddevice webrtcvad-wheels numpy openai pyyaml
 
 # 3. Claude CLI
 npm install -g @anthropic-ai/claude-code
 
-# 4. Correr doctor (detecta OS y genera config.local.yaml)
-./scripts/giselo-doctor
-
-# 5. Arrancar
+# 4. Arrancar
 .venv/bin/python3 crowia.py
 ```
 

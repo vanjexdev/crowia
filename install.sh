@@ -3,7 +3,7 @@
 # Usage: curl -L https://raw.githubusercontent.com/vanjexdev/crowia/main/install.sh | bash
 set -euo pipefail
 
-REPO="https://github.com/vanjexdev/crowia.git"
+REPO="https://github.com/vanjexdev/crowia"
 INSTALL_DIR="${GISELO_HOME:-$HOME/.local/share/crowia}"
 BIN_DIR="$HOME/.local/bin"
 LAUNCHER="$BIN_DIR/giselo"
