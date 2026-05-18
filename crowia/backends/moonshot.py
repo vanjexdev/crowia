@@ -33,7 +33,11 @@ class MoonshotBackend(Backend):
                 raise RuntimeError("openai package not installed. Run: pip install openai")
             if not self._api_key:
                 raise RuntimeError("KIMI_API_KEY no configurada. Exporta la variable o agrega api_key al registry.")
-            self._client = OpenAI(api_key=self._api_key, base_url=_BASE_URL)
+            self._client = OpenAI(
+                api_key=self._api_key,
+                base_url=_BASE_URL,
+                default_headers={"User-Agent": "kimi-cli/1.0"},
+            )
         return self._client
 
     def cancel(self) -> None:
