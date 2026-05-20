@@ -93,14 +93,10 @@ fi
 "$VENV/bin/pip" install --upgrade pip -q
 
 if [[ -f "$INSTALL_DIR/requirements.txt" ]]; then
-  "$VENV/bin/pip" install -r "$INSTALL_DIR/requirements.txt" -q
+  "$VENV/bin/pip" install -r "$INSTALL_DIR/requirements.txt"
   info "Dependencias instaladas desde requirements.txt"
 else
-  # fallback: install known deps
-  "$VENV/bin/pip" install \
-    faster-whisper anthropic pyyaml sounddevice webrtcvad \
-    evdev PyQt6 aiofiles websockets -q 2>/dev/null || true
-  info "Dependencias base instaladas"
+  error "requirements.txt no encontrado en $INSTALL_DIR. El repositorio puede estar incompleto."
 fi
 
 # ── create launcher ───────────────────────────────────────────────────────────
