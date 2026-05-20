@@ -29,7 +29,7 @@ class Recorder:
         if sys.platform == "linux":
             self._start_arecord()
         else:
-            self._start_sounddevice()
+            self._start_macos()
         log.info("Recording to %s", self._wav_path)
         return self._wav_path
 
@@ -37,7 +37,7 @@ class Recorder:
         if sys.platform == "linux":
             self._stop_arecord()
         else:
-            self._stop_sounddevice()
+            self._stop_macos()
         log.info("Recording stopped: %s", self._wav_path)
         return self._wav_path
 
@@ -73,17 +73,61 @@ class Recorder:
             log.debug("arecord stderr: %s", stderr.strip())
         self._proc = None
 
-    # ── macOS / sounddevice ────────────────────────────────────────────────────
+    # ── macOS / ffmpeg (avfoundation) ──────────────────────────────────────────
+
+    def _start_macos(self):
+        """Use ffmpeg avfoundation — most reliable macOS audio capture."""
+        import shutil
+        if not shutil.which("ffmpeg"):
+            log.warning("ffmpeg not found, falling back to sounddevice")
+            self._start_sounddevice()
+            self._macos_backend = "sounddevice"
+            return
+        self._macos_backend = "ffmpeg"
+        cmd = [
+            "ffmpeg", "-y",
+            "-f", "avfoundation",
+            "-i", ":0",
+            "-ar", str(self.cfg["rate"]),
+            "-ac", str(self.cfg["channels"]),
+            str(self._wav_path),
+        ]
+        log.debug("ffmpeg rec cmd: %s", " ".join(cmd))
+        self._proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            stdin=subprocess.DEVNULL,
+        )
+
+    def _stop_macos(self):
+        backend = getattr(self, "_macos_backend", "ffmpeg")
+        if backend == "sounddevice":
+            self._stop_sounddevice()
+            return
+        if not self._proc:
+            return
+        if self._proc.poll() is None:
+            self._proc.send_signal(signal.SIGINT)
+            try:
+                self._proc.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                log.warning("ffmpeg did not stop gracefully, killing")
+                self._proc.kill()
+                self._proc.wait()
+        stderr_text = self._proc.stderr.read().decode(errors="replace") if self._proc.stderr else ""
+        if stderr_text:
+            log.debug("ffmpeg stderr (tail): %s", stderr_text[-300:].strip())
+        self._proc = None
+
+    # ── sounddevice (fallback) ─────────────────────────────────────────────────
 
     def _start_sounddevice(self):
         try:
             import sounddevice as sd
             import numpy as np
         except ImportError:
-            raise RuntimeError(
-                "sounddevice not installed. Fix:\n"
-                "  pip install sounddevice numpy"
-            )
+            raise RuntimeError("sounddevice not installed — pip install sounddevice numpy")
 
         self._sd_frames = []
         self._sd_recording = True
@@ -116,7 +160,11 @@ class Recorder:
 
         try:
             import numpy as np
-            audio = np.concatenate(self._sd_frames, axis=0)
+            audio = np.concatenate(self._sd_frames, axis=0).flatten()
+            max_amp = int(np.abs(audio).max())
+            log.info("sounddevice audio: %d samples, max_amplitude=%d", len(audio), max_amp)
+            if max_amp < 50:
+                log.warning("Audio near-silent (max=%d) — check macOS mic volume", max_amp)
             with wave.open(str(self._wav_path), "wb") as wf:
                 wf.setnchannels(self.cfg["channels"])
                 wf.setsampwidth(2)  # int16

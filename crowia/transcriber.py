@@ -38,7 +38,11 @@ class Transcriber:
             no_speech_threshold=0.6,
             compression_ratio_threshold=2.4,
             vad_filter=True,
-            vad_parameters={"min_silence_duration_ms": 300},
+            vad_parameters={
+                "threshold": 0.3,           # default 0.5 — lower = more permissive
+                "min_speech_duration_ms": 100,
+                "min_silence_duration_ms": 300,
+            },
             initial_prompt=prompt,
         )
 
