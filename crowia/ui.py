@@ -1,9 +1,11 @@
+import base64
 import logging
 import math
 import pathlib
 import shutil
 import subprocess
 import threading
+import time
 
 try:
     import markdown as _md_lib
@@ -11,8 +13,8 @@ try:
 except ImportError:
     _MD_AVAILABLE = False
 
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal, pyqtSlot, QObject
-from PyQt6.QtGui import QPixmap, QPainter, QColor, QFont
+from PyQt6.QtCore import Qt, QBuffer, QByteArray, QIODevice, QTimer, pyqtSignal, pyqtSlot, QObject
+from PyQt6.QtGui import QImage, QPixmap, QPainter, QColor, QFont
 from PyQt6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox,
     QHBoxLayout, QLabel, QLineEdit, QMenu, QPlainTextEdit, QPushButton,
@@ -20,6 +22,7 @@ from PyQt6.QtWidgets import (
 )
 
 from . import prefs as prefs_mod
+from . import i18n as _i18n
 
 log = logging.getLogger(__name__)
 
@@ -30,6 +33,7 @@ STATE_IMAGE = {
     "idle":       "normal.png",
     "recording":  "open.png",
     "processing": "normal.png",
+    "thinking":   "thinking.png",
     "done":       "like.png",
 }
 
@@ -100,6 +104,8 @@ class _Signals(QObject):
     response  = pyqtSignal(str)
     cancel    = pyqtSignal()
     tts_state = pyqtSignal(bool)
+    user_msg  = pyqtSignal(str, list)
+    finalize  = pyqtSignal(str)
 
 
 class AudioBars(QWidget):
@@ -142,6 +148,7 @@ class AudioBars(QWidget):
 class _TextEdit(QPlainTextEdit):
     at_triggered     = pyqtSignal()
     submit_triggered = pyqtSignal()
+    image_pasted     = pyqtSignal(str)  # path to saved clipboard image
 
     def keyPressEvent(self, event):
         if (event.key() == Qt.Key.Key_Return
@@ -151,9 +158,30 @@ class _TextEdit(QPlainTextEdit):
         super().keyPressEvent(event)
         if event.text() == "@":
             c = self.textCursor()
-            c.deletePreviousChar()
-            self.setTextCursor(c)
-            self.at_triggered.emit()
+            pos = c.position()
+            text = self.toPlainText()
+            char_before = text[pos - 2] if pos >= 2 else None
+            if char_before is None or char_before.isspace():
+                c.deletePreviousChar()
+                self.setTextCursor(c)
+                self.at_triggered.emit()
+
+    def canInsertFromMimeData(self, source) -> bool:
+        if source.hasImage():
+            return True
+        return super().canInsertFromMimeData(source)
+
+    def insertFromMimeData(self, source):
+        if source.hasImage():
+            img: QImage = QApplication.clipboard().image()
+            if not img.isNull():
+                tmp_dir = pathlib.Path("/tmp/crowia")
+                tmp_dir.mkdir(parents=True, exist_ok=True)
+                path = tmp_dir / f"clipboard_{int(time.time() * 1000)}.png"
+                img.save(str(path))
+                self.image_pasted.emit(str(path))
+            return
+        super().insertFromMimeData(source)
 
 
 class TextInputPanel(QWidget):
@@ -171,7 +199,7 @@ class TextInputPanel(QWidget):
         layout.setSpacing(4)
 
         self._edit = _TextEdit()
-        self._edit.setPlaceholderText("Escribe tu mensaje… @ para adjuntar archivo/carpeta")
+        self._edit.setPlaceholderText(_i18n.t("input_placeholder"))
         self._edit.setMinimumHeight(60)
         self._edit.setStyleSheet(_INPUT_STYLE)
         layout.addWidget(self._edit)
@@ -191,16 +219,16 @@ class TextInputPanel(QWidget):
         btns.setSpacing(4)
         btns.addStretch()
 
-        self.send_btn = QPushButton("Enviar ↩")
+        self.send_btn = QPushButton(_i18n.t("send_btn"))
         self.send_btn.setStyleSheet(_ACTION_STYLE)
         self.send_btn.clicked.connect(self._submit)
         btns.addWidget(self.send_btn)
 
-        self.memory_btn = QPushButton("💾 Memoria")
+        self.memory_btn = QPushButton(_i18n.t("memory_btn"))
         self.memory_btn.setStyleSheet(_MEM_STYLE)
         btns.addWidget(self.memory_btn)
 
-        self.export_btn = QPushButton("📋 Exportar")
+        self.export_btn = QPushButton(_i18n.t("export_btn"))
         self.export_btn.setStyleSheet(_EXPORT_STYLE)
         btns.addWidget(self.export_btn)
 
@@ -208,14 +236,15 @@ class TextInputPanel(QWidget):
 
         self._edit.at_triggered.connect(self._pick_files)
         self._edit.submit_triggered.connect(self._submit)
+        self._edit.image_pasted.connect(self._on_file_ready)
 
     def focus(self):
         self._edit.setFocus()
 
     def _pick_files(self):
         menu = QMenu(self)
-        menu.addAction("📄 Archivo", lambda: self._launch_picker(folder=False))
-        menu.addAction("📁 Carpeta", lambda: self._launch_picker(folder=True))
+        menu.addAction(_i18n.t("pick_file"), lambda: self._launch_picker(folder=False))
+        menu.addAction(_i18n.t("pick_folder"), lambda: self._launch_picker(folder=True))
         menu.exec(self._edit.mapToGlobal(self._edit.rect().bottomLeft()))
 
     @pyqtSlot(str)
@@ -242,7 +271,9 @@ class TextInputPanel(QWidget):
         if path in self._files:
             return
         self._files.append(path)
-        btn = QPushButton(f"📎 {path.name} ✕")
+        _IMG_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
+        icon = "🖼" if path.suffix.lower() in _IMG_EXTS else "📎"
+        btn = QPushButton(f"{icon} {path.name} ✕")
         btn.setStyleSheet(_CHIP_STYLE)
         btn.clicked.connect(lambda checked=False, p=path, b=btn: self._remove_chip(p, b))
         self._chips_row.addWidget(btn)
@@ -271,13 +302,22 @@ class TextInputPanel(QWidget):
         self._chips_widget.hide()
 
 
+_SCALE_OPTIONS = [
+    ("75%",  0.75),
+    ("100%", 1.0),
+    ("125%", 1.25),
+    ("150%", 1.5),
+    ("200%", 2.0),
+]
+
+
 class PrefsDialog(QDialog):
     def __init__(self, prefs: dict, hotkey_keys: list[str],
                  backends: list[dict] | None = None,
                  current_backend: str = "",
                  parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Giselo — Preferencias")
+        self.setWindowTitle(_i18n.t("prefs_title"))
         self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
         self.setMinimumWidth(400)
         self._prefs = dict(prefs)
@@ -288,7 +328,7 @@ class PrefsDialog(QDialog):
 
         # ── Backend selector ────────────────────────────────────────────────
         if backends:
-            layout.addWidget(QLabel("Backend activo:"))
+            layout.addWidget(QLabel(_i18n.t("prefs_backend_label")))
             self._backend_combo = QComboBox()
             for entry in backends:
                 self._backend_combo.addItem(entry.get("label", entry["id"]), entry["id"])
@@ -301,34 +341,54 @@ class PrefsDialog(QDialog):
         else:
             self._backend_combo = None
 
-        self._cb_text = QCheckBox("Mostrar respuesta en texto")
+        # ── UI scale ────────────────────────────────────────────────────────
+        layout.addWidget(QLabel(_i18n.t("prefs_scale_label")))
+        self._scale_combo = QComboBox()
+        current_scale = prefs.get("ui_scale", 1.0)
+        for label, value in _SCALE_OPTIONS:
+            self._scale_combo.addItem(label, value)
+            if abs(value - current_scale) < 0.01:
+                self._scale_combo.setCurrentIndex(self._scale_combo.count() - 1)
+        layout.addWidget(self._scale_combo)
+
+        # ── Language selector ────────────────────────────────────────────────
+        layout.addWidget(QLabel(_i18n.t("prefs_language_label")))
+        self._lang_combo = QComboBox()
+        current_lang = prefs.get("language", "es")
+        for label, code in _i18n._LANG_OPTIONS:
+            self._lang_combo.addItem(label, code)
+            if code == current_lang:
+                self._lang_combo.setCurrentIndex(self._lang_combo.count() - 1)
+        layout.addWidget(self._lang_combo)
+
+        self._cb_text = QCheckBox(_i18n.t("prefs_show_text"))
         self._cb_text.setChecked(prefs.get("show_response_text", True))
         layout.addWidget(self._cb_text)
 
-        self._cb_tts = QCheckBox("Activar respuesta por voz (TTS)")
+        self._cb_tts = QCheckBox(_i18n.t("prefs_tts"))
         self._cb_tts.setChecked(prefs.get("tts_enabled", True))
         layout.addWidget(self._cb_tts)
 
-        self._cb_md = QCheckBox("Renderizar markdown en respuesta")
+        self._cb_md = QCheckBox(_i18n.t("prefs_markdown"))
         self._cb_md.setChecked(prefs.get("render_markdown", False))
         if not _MD_AVAILABLE:
             self._cb_md.setEnabled(False)
-            self._cb_md.setToolTip("pip install markdown para habilitar")
+            self._cb_md.setToolTip(_i18n.t("prefs_markdown_tip"))
         layout.addWidget(self._cb_md)
 
         # ── Hotkey ──────────────────────────────────────────────────────────
-        hotkey_lbl = QLabel("Hotkey (nombres evdev, separados por coma):")
+        hotkey_lbl = QLabel(_i18n.t("prefs_hotkey_label"))
         layout.addWidget(hotkey_lbl)
 
         self._hotkey_edit = QLineEdit(",".join(hotkey_keys))
-        self._hotkey_edit.setPlaceholderText("ej: KEY_RIGHTCTRL,KEY_GRAVE")
+        self._hotkey_edit.setPlaceholderText(_i18n.t("prefs_hotkey_placeholder"))
         self._hotkey_hint = QLabel("")
         self._hotkey_hint.setStyleSheet("color: #cc4444; font-size: 11px;")
         self._hotkey_edit.textChanged.connect(self._validate_hotkey)
         layout.addWidget(self._hotkey_edit)
         layout.addWidget(self._hotkey_hint)
 
-        hint = QLabel("Teclas: KEY_RIGHTCTRL, KEY_LEFTALT, KEY_GRAVE, KEY_F1…F12, KEY_1…KEY_0")
+        hint = QLabel(_i18n.t("prefs_hotkey_hint"))
         hint.setStyleSheet("color: #888; font-size: 10px;")
         layout.addWidget(hint)
 
@@ -344,10 +404,10 @@ class PrefsDialog(QDialog):
         keys = [k.strip() for k in text.split(",") if k.strip()]
         invalid = [k for k in keys if not hasattr(ecodes, k)]
         if invalid:
-            self._hotkey_hint.setText(f"Desconocidas: {', '.join(invalid)}")
+            self._hotkey_hint.setText(_i18n.t("prefs_hotkey_invalid", keys=', '.join(invalid)))
             return False
         if not keys:
-            self._hotkey_hint.setText("Ingresa al menos una tecla.")
+            self._hotkey_hint.setText(_i18n.t("prefs_hotkey_empty"))
             return False
         self._hotkey_hint.setText("")
         return True
@@ -364,12 +424,20 @@ class PrefsDialog(QDialog):
             return None
         return self._backend_combo.currentData()
 
+    def selected_scale(self) -> float:
+        return self._scale_combo.currentData()
+
+    def selected_language(self) -> str:
+        return self._lang_combo.currentData()
+
     def result_prefs(self) -> dict:
         return {
             **self._prefs,
             "show_response_text": self._cb_text.isChecked(),
             "tts_enabled": self._cb_tts.isChecked(),
             "render_markdown": self._cb_md.isChecked(),
+            "ui_scale": self._scale_combo.currentData(),
+            "language": self._lang_combo.currentData(),
         }
 
 
@@ -381,6 +449,8 @@ class CrowiaOverlay(QWidget):
     skip_tts        = pyqtSignal()
     hotkey_changed  = pyqtSignal(list)   # list[str] — new evdev key names
     backend_changed = pyqtSignal(str)    # backend id
+    scale_changed   = pyqtSignal(float)  # new scale factor
+    language_changed = pyqtSignal(str)
 
     def __init__(self, cfg: dict | None = None, on_cancel=None):
         super().__init__()
@@ -453,7 +523,7 @@ class CrowiaOverlay(QWidget):
         left_btns.setSpacing(4)
 
         self._cancel_btn = QPushButton("⏹")
-        self._cancel_btn.setToolTip("Cancelar")
+        self._cancel_btn.setToolTip(_i18n.t("tooltip_cancel"))
         self._cancel_btn.setStyleSheet(_btn_style(180, 40, 40))
         self._cancel_btn.setFixedSize(34, 30)
         self._cancel_btn.clicked.connect(self._on_cancel_clicked)
@@ -461,7 +531,7 @@ class CrowiaOverlay(QWidget):
         left_btns.addWidget(self._cancel_btn)
 
         self._skip_btn = QPushButton("⏭")
-        self._skip_btn.setToolTip("Saltar audio")
+        self._skip_btn.setToolTip(_i18n.t("tooltip_skip"))
         self._skip_btn.setStyleSheet(_btn_style(160, 100, 20))
         self._skip_btn.setFixedSize(34, 30)
         self._skip_btn.clicked.connect(lambda: (self.skip_tts.emit(), self._apply_state("idle")))
@@ -471,21 +541,21 @@ class CrowiaOverlay(QWidget):
         left_btns.addStretch()
 
         self._tts_btn = QPushButton(self._tts_icon())
-        self._tts_btn.setToolTip("Activar/desactivar voz")
+        self._tts_btn.setToolTip(_i18n.t("tooltip_tts"))
         self._tts_btn.setStyleSheet(_btn_style(40, 80, 140))
         self._tts_btn.setFixedSize(34, 30)
         self._tts_btn.clicked.connect(self._on_tts_clicked)
         left_btns.addWidget(self._tts_btn)
 
         self._mode_btn = QPushButton("⇔" if layout_mode == "horizontal" else "⇕")
-        self._mode_btn.setToolTip("Cambiar orientación")
+        self._mode_btn.setToolTip(_i18n.t("tooltip_layout"))
         self._mode_btn.setStyleSheet(_btn_style(60, 60, 120))
         self._mode_btn.setFixedSize(34, 30)
         self._mode_btn.clicked.connect(self._toggle_layout_mode)
         left_btns.addWidget(self._mode_btn)
 
         self._hide_right_btn = QPushButton()
-        self._hide_right_btn.setToolTip("Mostrar/ocultar panel")
+        self._hide_right_btn.setToolTip(_i18n.t("tooltip_panel"))
         self._hide_right_btn.setStyleSheet(_btn_style(60, 100, 60))
         self._hide_right_btn.setFixedSize(34, 30)
         self._hide_right_btn.clicked.connect(self._toggle_right_panel)
@@ -533,12 +603,21 @@ class CrowiaOverlay(QWidget):
         self._right_widget.setVisible(right_visible)
         self._update_hide_btn_icon()
 
+        # ── chat history state ─────────────────────────────────────────────────
+        self._chat_history: list[tuple[str, list, str]] = []  # (user, files, assistant)
+        self._pending_user: str = ""
+        self._pending_files: list = []
+        self._thumb_cache: dict[str, str] = {}    # path → base64 PNG thumbnail
+        self._preview_cache: dict[str, str] = {}  # path → text preview
+
         # ── signals ────────────────────────────────────────────────────────────
         self._signals = _Signals()
         self._signals.state.connect(self._apply_state)
         self._signals.response.connect(self._apply_response)
         self._signals.cancel.connect(self._on_cancel_clicked)
         self._signals.tts_state.connect(self._apply_tts_state)
+        self._signals.user_msg.connect(self._apply_user_msg)
+        self._signals.finalize.connect(self._apply_finalize)
 
         self.setCursor(Qt.CursorShape.SizeAllCursor)
         self._set_image("idle")
@@ -555,6 +634,12 @@ class CrowiaOverlay(QWidget):
     def set_response(self, text: str):
         self._signals.response.emit(text)
 
+    def add_user_message(self, text: str, files: list | None = None):
+        self._signals.user_msg.emit(text, files or [])
+
+    def finalize_response(self, text: str):
+        self._signals.finalize.emit(text)
+
     def set_tts_state(self, enabled: bool):
         self._signals.tts_state.emit(enabled)
 
@@ -565,7 +650,7 @@ class CrowiaOverlay(QWidget):
             self._backend_label.setText(state[8:].upper())
             return
         self._set_image(state)
-        if state in ("recording", "processing"):
+        if state in ("recording", "processing", "thinking"):
             self._bars.start()
             self._cancel_btn.show()
             self._skip_btn.hide()
@@ -596,6 +681,8 @@ class CrowiaOverlay(QWidget):
         prefs_mod.save(self._prefs)
         self._tts_btn.setText(self._tts_icon())
         self.tts_toggled.emit(self._tts_enabled)
+        if not self._tts_enabled:
+            self.skip_tts.emit()
 
     def _apply_tts_state(self, enabled: bool):
         self._tts_enabled = enabled
@@ -648,24 +735,145 @@ class CrowiaOverlay(QWidget):
     def _on_text_submitted(self, text: str, files: list):
         self.text_submitted.emit(text, files)
 
+    # ── chat history slots (main thread) ──────────────────────────────────────
+
+    def _apply_user_msg(self, text: str, files: list):
+        self._pending_user = text
+        self._pending_files = files
+        self._render_chat()
+
+    def _apply_finalize(self, text: str):
+        if self._pending_user:
+            self._chat_history.append((self._pending_user, self._pending_files, text))
+            self._pending_user = ""
+            self._pending_files = []
+        self._render_chat()
+
     def _apply_response(self, text: str):
         if not text:
             return
-        if self._render_md and _MD_AVAILABLE:
-            html = _md_lib.markdown(text, extensions=["fenced_code", "tables"])
-            md_style = (
-                "<style>"
-                "body{color:rgba(220,235,255,230);font-family:Sans;font-size:10pt;}"
-                "code{background:rgba(255,255,255,15);border-radius:3px;padding:1px 4px;}"
-                "pre{background:rgba(0,0,0,50);border-radius:6px;padding:8px;}"
-                "</style>"
-            )
-            self._response_box.setHtml(md_style + html)
-        else:
-            self._response_box.setPlainText(text)
+        self._render_chat(streaming=text)
+
+    _IMG_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
+    _TEXT_EXTS = {".py", ".js", ".ts", ".jsx", ".tsx", ".html", ".css", ".json",
+                  ".yaml", ".yml", ".toml", ".md", ".txt", ".sh", ".fish",
+                  ".liquid", ".xml", ".sql", ".rs", ".go", ".java", ".c", ".cpp",
+                  ".h", ".php", ".rb", ".kt", ".swift", ".vue", ".svelte"}
+    _CHIP = ("background:rgba(50,70,130,160);color:rgba(200,220,255,220);"
+             "border-radius:4px;padding:1px 6px;font-size:9pt;")
+
+    def _get_thumb_b64(self, path: pathlib.Path) -> str:
+        key = str(path)
+        if key not in self._thumb_cache:
+            try:
+                img = QImage(str(path))
+                if img.isNull():
+                    self._thumb_cache[key] = ""
+                else:
+                    img = img.scaled(240, 160, Qt.AspectRatioMode.KeepAspectRatio,
+                                     Qt.TransformationMode.SmoothTransformation)
+                    buf_data = QByteArray()
+                    buf = QBuffer(buf_data)
+                    buf.open(QIODevice.OpenModeFlag.WriteOnly)
+                    img.save(buf, "PNG")
+                    self._thumb_cache[key] = base64.b64encode(bytes(buf_data)).decode()
+            except Exception:
+                self._thumb_cache[key] = ""
+        return self._thumb_cache[key]
+
+    def _get_text_preview(self, path: pathlib.Path) -> str:
+        key = str(path)
+        if key not in self._preview_cache:
+            try:
+                lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+                preview = "\n".join(lines[:8])
+                if len(lines) > 8:
+                    preview += "\n" + _i18n.t("preview_lines", n=len(lines))
+                self._preview_cache[key] = preview
+            except Exception:
+                self._preview_cache[key] = ""
+        return self._preview_cache[key]
+
+    def _file_chips_html(self, files: list) -> str:
+        if not files:
+            return ""
+        parts = ['<div style="margin:3px 0 6px 0;">']
+        for f in files:
+            p = pathlib.Path(f)
+            ext = p.suffix.lower()
+            is_img = ext in self._IMG_EXTS
+            is_txt = ext in self._TEXT_EXTS
+            icon = "🖼" if is_img else ("📁" if p.is_dir() else ("📎" if not is_txt else "📄"))
+            parts.append(f'<span style="{self._CHIP}">{icon} {self._esc(p.name)}</span>')
+            if is_img and p.exists():
+                b64 = self._get_thumb_b64(p)
+                if b64:
+                    parts.append(
+                        f'<br/><img src="data:image/png;base64,{b64}" '
+                        f'style="max-width:240px;max-height:160px;border-radius:4px;'
+                        f'margin:4px 0 4px 0;display:block;"/>'
+                    )
+            elif is_txt and p.exists():
+                preview = self._get_text_preview(p)
+                if preview:
+                    parts.append(
+                        f'<pre style="margin:4px 0;font-size:8pt;'
+                        f'background:rgba(0,0,0,50);border-radius:4px;padding:4px;">'
+                        f'{self._esc(preview)}</pre>'
+                    )
+        parts.append("</div>")
+        return "".join(parts)
+
+    def _render_chat(self, streaming: str = ""):
+        _U = "rgba(150,200,255,200)"
+        _B = "rgba(160,255,160,200)"
+        _STYLE = (
+            "<style>"
+            "body{color:rgba(220,235,255,230);font-family:Sans;font-size:10pt;margin:0;padding:4px;}"
+            ".lbl{font-size:9pt;font-weight:bold;margin:6px 0 2px 0;}"
+            ".msg{white-space:pre-wrap;margin:0 0 4px 0;}"
+            "hr{border:none;border-top:1px solid rgba(100,150,255,40);margin:8px 0;}"
+            "code{background:rgba(255,255,255,15);border-radius:3px;padding:1px 4px;}"
+            "pre{background:rgba(0,0,0,50);border-radius:6px;padding:8px;}"
+            "</style>"
+        )
+        parts = [_STYLE]
+        for i, (user, files, assistant) in enumerate(self._chat_history):
+            if i > 0:
+                parts.append("<hr/>")
+            parts.append(f'<p class="lbl" style="color:{_U}">{_i18n.t("chat_user")}</p>')
+            parts.append(f'<p class="msg">{self._esc(user)}</p>')
+            parts.append(self._file_chips_html(files))
+            parts.append(f'<p class="lbl" style="color:{_B}">{_i18n.t("chat_assistant")}</p>')
+            if self._render_md and _MD_AVAILABLE:
+                parts.append(_md_lib.markdown(assistant, extensions=["fenced_code", "tables"]))
+            else:
+                parts.append(f'<p class="msg">{self._esc(assistant)}</p>')
+        if self._pending_user:
+            if self._chat_history:
+                parts.append("<hr/>")
+            parts.append(f'<p class="lbl" style="color:{_U}">{_i18n.t("chat_user")}</p>')
+            parts.append(f'<p class="msg">{self._esc(self._pending_user)}</p>')
+            parts.append(self._file_chips_html(self._pending_files))
+            if streaming:
+                parts.append(f'<p class="lbl" style="color:{_B}">{_i18n.t("chat_assistant")}</p>')
+                if self._render_md and _MD_AVAILABLE:
+                    parts.append(_md_lib.markdown(streaming, extensions=["fenced_code", "tables"]))
+                else:
+                    parts.append(f'<p class="msg">{self._esc(streaming)}</p>')
+        self._response_box.setHtml("".join(parts))
+        sb = self._response_box.verticalScrollBar()
+        sb.setValue(sb.maximum())
         if self._prefs.get("show_response_text", True):
             self._response_box.show()
             self._fit()
+
+    @staticmethod
+    def _esc(text: str) -> str:
+        return (text.replace("&", "&amp;")
+                    .replace("<", "&lt;")
+                    .replace(">", "&gt;")
+                    .replace("\n", "<br/>"))
 
     def _on_splitter_moved(self, _pos, _index):
         mode = self._prefs.get("layout_mode", "horizontal")
@@ -728,19 +936,28 @@ class CrowiaOverlay(QWidget):
 
         show_text = self._prefs.get("show_response_text", True)
         menu.addAction(
-            "Ocultar texto de respuesta" if show_text else "Mostrar texto de respuesta",
+            _i18n.t("menu_hide_text") if show_text else _i18n.t("menu_show_text"),
             self._toggle_response_text,
         )
         menu.addAction(
-            "Silenciar voz" if self._tts_enabled else "Activar voz",
+            _i18n.t("menu_mute_voice") if self._tts_enabled else _i18n.t("menu_unmute_voice"),
             self._on_tts_clicked,
         )
-        menu.addAction("Preferencias…", self._open_prefs_dialog)
+        menu.addAction(_i18n.t("menu_prefs"), self._open_prefs_dialog)
+        menu.addAction(_i18n.t("menu_clear_chat"), self._clear_chat)
         menu.addSeparator()
-        menu.addAction("Ocultar", self.hide)
+        menu.addAction(_i18n.t("menu_hide"), self.hide)
         menu.addSeparator()
-        menu.addAction("Salir", QApplication.quit)
+        menu.addAction(_i18n.t("menu_quit"), QApplication.quit)
         menu.exec(event.globalPos())
+
+    def _clear_chat(self):
+        self._chat_history.clear()
+        self._pending_user = ""
+        self._pending_files = []
+        self._thumb_cache.clear()
+        self._preview_cache.clear()
+        self._response_box.clear()
 
     def _toggle_response_text(self):
         show = not self._prefs.get("show_response_text", True)
@@ -783,3 +1000,12 @@ class CrowiaOverlay(QWidget):
             if new_backend and new_backend != current_backend:
                 self._cfg["_active_backend"] = new_backend
                 self.backend_changed.emit(new_backend)
+            new_scale = dlg.selected_scale()
+            if abs(new_scale - self._prefs.get("ui_scale", 1.0)) > 0.01:
+                self.scale_changed.emit(new_scale)
+            new_lang = dlg.selected_language()
+            old_lang = self._prefs.get("language", "es")
+            if new_lang != old_lang:
+                self._prefs["language"] = new_lang
+                prefs_mod.save(self._prefs)
+                self.language_changed.emit(new_lang)

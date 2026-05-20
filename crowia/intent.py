@@ -5,26 +5,36 @@ import re
 log = logging.getLogger(__name__)
 
 _SCREENSHOT_KW = [
-    "mira la pantalla", "mira la pantalla", "qué ves", "que ves",
+    "mira la pantalla", "qué ves", "que ves",
     "captura de pantalla", "screenshot", "qué hay en pantalla",
     "que hay en pantalla", "muéstrame la pantalla", "muestrame la pantalla",
     "analiza la pantalla", "qué está en pantalla", "que esta en pantalla",
     "mira esto en pantalla", "describe la pantalla",
+    # English
+    "look at the screen", "look at screen", "what do you see",
+    "what's on screen", "what is on screen", "show me the screen",
+    "describe the screen", "analyze the screen",
 ]
 
 _VOLUME_UP_KW = [
     "sube el volumen", "aumenta el volumen", "más volumen", "mas volumen",
     "sube el audio", "aumenta el audio", "sube el sonido",
+    # English
+    "volume up", "increase volume", "louder", "raise volume", "turn up",
 ]
 
 _VOLUME_DOWN_KW = [
     "baja el volumen", "reduce el volumen", "menos volumen",
     "baja el audio", "reduce el audio", "baja el sonido",
+    # English
+    "volume down", "decrease volume", "quieter", "lower volume", "turn down",
 ]
 
 _VOLUME_MUTE_KW = [
     "silencia", "mutea", "sin sonido", "apaga el sonido",
     "silencia el audio", "quita el sonido",
+    # English
+    "mute audio", "mute sound", "no sound", "silence audio",
 ]
 
 def _sw(names: list[str]) -> list[str]:
@@ -41,12 +51,18 @@ _BACKEND_SWITCH = {
     "claude": _sw(["claude", "cloud", "clouding", "cloude", "clod", "clau"]),
     "codex": _sw(["codex"]),
     "opencode": _sw(["opencode", "open code", "openco", "openko"]),
+    "qwen25-3b": _sw(["qwen", "qwen2", "qwen 2.5", "qwen2.5", "qwen local"]),
+    "deepseek-coder": _sw(["deepseek", "deep seek", "deepseek coder", "deepseek-coder"]),
+    "gemma4": _sw(["gemma", "gemma4", "gemma 4"]),
 }
 
 _CLEAR_HISTORY_KW = [
     "borra el historial", "limpia el historial", "olvida la conversación",
     "olvida la conversacion", "nueva conversación", "nueva conversacion",
     "reinicia la conversación", "reinicia la conversacion",
+    # English
+    "clear history", "clear the history", "forget the conversation",
+    "forget conversation", "new conversation", "reset conversation",
 ]
 
 _MEDIA_PAUSE_KW = [
@@ -55,6 +71,8 @@ _MEDIA_PAUSE_KW = [
     "para la música", "para la canción", "para el audio",
     "detén la música", "detener música", "detener el audio",
     "stop music",
+    # English
+    "pause music", "pause the music", "pause video", "pause audio",
 ]
 
 _MEDIA_PLAY_KW = [
@@ -62,28 +80,40 @@ _MEDIA_PLAY_KW = [
     "continúa la música", "continua la música",
     "reproduce la música", "pon la música", "pon música",
     "sigue la música", "sigue reproduciendo",
+    # English
+    "play music", "resume music", "resume the music", "play the music",
 ]
 
 _MEDIA_NEXT_KW = [
     "siguiente canción", "siguiente pista", "siguiente track",
     "salta la canción", "próxima canción", "proxima cancion",
     "pon la siguiente", "cambia la canción",
+    # English
+    "next song", "next track", "skip song", "skip the song",
 ]
 
 _MEDIA_PREV_KW = [
     "canción anterior", "pista anterior", "track anterior",
     "vuelve a la anterior", "regresa la canción", "cancion anterior",
+    # English
+    "previous song", "previous track", "go back", "last song",
 ]
 
 _TTS_MUTE_KW = [
     "silencia las respuestas", "desactiva el audio", "desactiva la voz",
     "silencia la voz", "sin audio", "modo silencioso", "no hables",
     "apaga el audio", "apaga la voz",
+    # English
+    "mute responses", "disable voice", "silent mode", "stop talking",
+    "turn off voice", "disable audio",
 ]
 _TTS_UNMUTE_KW = [
     "activa el audio", "activa la voz",
     "activa las respuestas de voz", "pon el audio", "pon la voz",
     "vuelve a hablar", "habla de nuevo", "quiero escucharte",
+    # English
+    "enable voice", "enable audio", "turn on voice", "start talking",
+    "unmute", "unmute voice",
 ]
 
 _SKILL_DISABLE_RE = re.compile(

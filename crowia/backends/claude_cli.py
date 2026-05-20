@@ -133,12 +133,13 @@ class ClaudeCliBackend(Backend):
             with self._lock:
                 self._proc = None
 
-        if rc not in (0, -9):
+        # -9 = SIGKILL (our cancel), -15 or 143 = SIGTERM (external kill / cancel)
+        if rc in (-9, -15, 143):
+            return ""
+
+        if rc != 0:
             log.error("CLI error (rc=%d) stderr: %s | stdout: %s", rc, stderr_data[:300], accumulated[:300])
             return f"[crowia] Error del CLI (rc={rc})"
-
-        if rc == -9:
-            return ""
 
         response = accumulated.strip()
         log.info("Claude response (%d chars): %s", len(response), response[:200])
