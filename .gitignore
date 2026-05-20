@@ -12,3 +12,8 @@ site/pnpm-lock.yaml
 # certs
 *.crt
 *.key
+# local runtime dirs
+.context/
+.giselo/
+# site extras
+site/pnpm-workspace.yaml
