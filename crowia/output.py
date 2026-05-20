@@ -30,7 +30,13 @@ def _best_say_voice(lang: str) -> str | None:
         pass
     _say_voice_cache[key] = voice
     if voice:
-        log.debug("say voice for '%s': %s", key, voice)
+        log.info("say voice selected for '%s': %s", key, voice)
+    else:
+        log.warning(
+            "No Spanish say voice found. Options:\n"
+            "  1. macOS: System Settings → Accessibility → Spoken Content → Manage Voices → Español\n"
+            "  2. pip install piper-tts + download model (better quality)"
+        )
     return voice
 
 
