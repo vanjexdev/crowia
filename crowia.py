@@ -456,7 +456,12 @@ def main():
             cfg["claude"].get("model", "claude-sonnet-4-6"),
         )
         def _run_hotkey_listener():
-            asyncio.run(listener.run())
+            try:
+                asyncio.run(listener.run())
+            except RuntimeError as e:
+                log.error("Hotkey listener error: %s", e)
+                if overlay and ui_queue:
+                    ui_queue.put((output.show, ("Giselo", str(e)), {}))
         t = threading.Thread(target=_run_hotkey_listener, daemon=True)
         t.start()
 

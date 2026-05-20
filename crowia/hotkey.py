@@ -6,6 +6,19 @@ from typing import Callable
 
 log = logging.getLogger(__name__)
 
+
+def _macos_has_accessibility() -> bool:
+    """Check if process has macOS Accessibility permission (required by pynput)."""
+    try:
+        import ctypes
+        lib = ctypes.cdll.LoadLibrary(
+            "/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices"
+        )
+        return bool(lib.AXIsProcessTrusted())
+    except Exception:
+        return True  # can't check — assume OK
+
+
 # evdev key name → canonical string for pynput comparison
 _EVDEV_TO_CANON = {
     "KEY_RIGHTCTRL": "ctrl", "KEY_LEFTCTRL": "ctrl",
@@ -181,10 +194,19 @@ class HotkeyListener:
         except ImportError:
             raise RuntimeError(
                 "pynput not installed. Fix:\n"
-                "  ~/.local/share/crowia/.venv/bin/pip install pynput\n"
-                "macOS: also grant Accessibility permission:\n"
-                "  System Settings → Privacy & Security → Accessibility → add Terminal"
+                "  ~/.local/share/crowia/.venv/bin/pip install pynput"
             )
+
+        # macOS: pynput sends SIGTRAP (kills process) if Accessibility is not granted.
+        # Check before calling Listener.start() so we can fail with a clear message.
+        if sys.platform == "darwin" and not _macos_has_accessibility():
+            raise RuntimeError(
+                "Giselo necesita permiso de Accesibilidad para detectar el hotkey.\n\n"
+                "  System Settings → Privacy & Security → Accessibility\n"
+                "  → habilitar Terminal (o iTerm2)\n\n"
+                "Luego reinicia Giselo. La ventana funciona sin hotkey por ahora."
+            )
+
         log.info("Listening via pynput. Target keys: %s (%s mode)",
                  self.target_keys_str, self.mode)
         self._pynput_listener = Listener(
@@ -192,10 +214,7 @@ class HotkeyListener:
             on_release=self._on_release,
         )
         self._pynput_listener.start()
-        log.info(
-            "macOS: if hotkey not detected → System Settings → Privacy & Security "
-            "→ Accessibility → add Terminal (or iTerm)"
-        )
+        log.info("pynput listener active")
         try:
             await asyncio.sleep(float("inf"))
         except asyncio.CancelledError:
