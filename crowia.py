@@ -102,8 +102,12 @@ def main():
             def process_ui_queue():
                 try:
                     while True:
-                        fn, args, kwargs = ui_queue.get_nowait()
-                        fn(*args, **kwargs)
+                        fn, a, kw = ui_queue.get_nowait()
+                        try:
+                            fn(*a, **kw)
+                        except Exception as _e:
+                            logging.getLogger("crowia").warning(
+                                "UI queue callback error: %s", _e)
                 except queue.Empty:
                     pass
             timer = QTimer()
