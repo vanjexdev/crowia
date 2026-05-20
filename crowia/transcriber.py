@@ -2,6 +2,7 @@ import logging
 import pathlib
 
 from faster_whisper import WhisperModel
+from . import i18n as _i18n
 
 log = logging.getLogger(__name__)
 
@@ -25,18 +26,20 @@ class Transcriber:
             log.warning("WAV very small (%d bytes)", wav_path.stat().st_size)
             return ""
 
-        log.debug("Transcribing %s", wav_path)
+        lang = _i18n.t("whisper_lang") or self.language
+        prompt = _i18n.t("whisper_initial_prompt") or self.initial_prompt or None
+        log.debug("Transcribing %s (lang=%s)", wav_path, lang)
         segs, _ = self._model.transcribe(
             str(wav_path),
-            language=self.language,
+            language=lang or None,
             beam_size=3,
             temperature=0,
-            condition_on_previous_text=False,   # evita alucinaciones/repeticiones
-            no_speech_threshold=0.6,            # descarta clips sin voz
-            compression_ratio_threshold=2.4,    # descarta output sin sentido
+            condition_on_previous_text=False,
+            no_speech_threshold=0.6,
+            compression_ratio_threshold=2.4,
             vad_filter=True,
             vad_parameters={"min_silence_duration_ms": 300},
-            initial_prompt=self.initial_prompt or None,
+            initial_prompt=prompt,
         )
 
         text = " ".join(s.text for s in segs).strip()

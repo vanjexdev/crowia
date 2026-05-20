@@ -134,6 +134,24 @@ cd ~/host/Workspace/agents/crowia
 
 ---
 
+## Sesión 2026-05-17: Investigación Ollama AI
+
+**Contexto:** Usuario quiere instalar Ollama en su PC CachyOS y saber qué modelo usar.
+
+**Specs del usuario:**
+- CPU: Intel Core i7-1355U (13th gen, 12 threads)
+- RAM: 32GB
+- GPU: Intel Iris Xe (integrada, sin GPU dedicada)
+
+**Recomendación:**
+- Instalar `ollama-vulkan` (AUR) para aceleración GPU con Intel Iris Xe
+- Modelo recomendado: `qwen2.5:14b` (~9GB RAM) — buen español, razonamiento sólido
+- Alternativas: `llama3.1:8b` (más rápido), `qwen2.5:32b` (máxima calidad, más lento), `deepseek-r1:8b` (thinking)
+
+**Estado:** Investigación completada. Instalación pendiente para próxima sesión.
+
+---
+
 ## Archivos sensibles (NUNCA committear)
 
 | Archivo | Contenido |

@@ -28,6 +28,12 @@ INSTANCES_FILE = pathlib.Path.home() / ".config/crowia/instances.json"
 CROWIA_SCRIPT  = pathlib.Path(__file__).parent / "crowia.py"
 PYTHON         = pathlib.Path(__file__).parent / ".venv/bin/python3"
 
+sys.path.insert(0, str(pathlib.Path(__file__).parent))
+from crowia import i18n as _i18n
+from crowia import prefs as _prefs_mod
+_i18n.set_lang(_prefs_mod.load().get("language", "es"))
+from crowia.i18n import t as _t
+
 def _load_backend_ids() -> list[dict]:
     try:
         sys.path.insert(0, str(pathlib.Path(__file__).parent))
@@ -112,7 +118,7 @@ def stop(inst_id: str):
 class CreateDialog(QDialog):
     def __init__(self, parent=None, existing=None):
         super().__init__(parent)
-        self.setWindowTitle("Nueva instancia" if not existing else "Editar instancia")
+        self.setWindowTitle(_t("launcher_dialog_new") if not existing else _t("launcher_dialog_edit"))
         self.setMinimumWidth(420)
 
         layout = QFormLayout(self)
@@ -120,8 +126,8 @@ class CreateDialog(QDialog):
         layout.setContentsMargins(16, 16, 16, 16)
 
         self._name = QLineEdit(existing["name"] if existing else "")
-        self._name.setPlaceholderText("Ej: Claude Principal")
-        layout.addRow("Nombre:", self._name)
+        self._name.setPlaceholderText(_t("launcher_name_placeholder"))
+        layout.addRow(_t("launcher_name_label"), self._name)
 
         self._backend = QComboBox()
         backends = _load_backend_ids()
@@ -130,14 +136,13 @@ class CreateDialog(QDialog):
         if existing:
             idx = next((i for i in range(self._backend.count()) if self._backend.itemData(i) == existing["backend"]), 0)
             self._backend.setCurrentIndex(idx)
-        layout.addRow("Backend:", self._backend)
+        layout.addRow(_t("launcher_backend_label"), self._backend)
 
         self._hotkey = QComboBox()
         self._hotkey.setEditable(True)
         for label, evdev in HOTKEY_SUGGESTIONS:
             self._hotkey.addItem(label, userData=evdev)
         if existing:
-            # try to match evdev string → show its label; fallback to raw text
             matched = False
             for i, (_, evdev) in enumerate(HOTKEY_SUGGESTIONS):
                 if evdev == existing["hotkey"]:
@@ -148,9 +153,9 @@ class CreateDialog(QDialog):
                 self._hotkey.setCurrentText(existing["hotkey"])
         else:
             self._hotkey.setCurrentIndex(0)
-        layout.addRow("Hotkey:", self._hotkey)
+        layout.addRow(_t("launcher_hotkey_label"), self._hotkey)
 
-        hint = QLabel("Selecciona una combinación o escribe teclas evdev separadas por coma.")
+        hint = QLabel(_t("launcher_hotkey_hint"))
         hint.setWordWrap(True)
         hint.setStyleSheet("color: #888; font-size: 11px;")
         layout.addRow("", hint)
@@ -164,7 +169,7 @@ class CreateDialog(QDialog):
 
     def _validate(self):
         if not self._hotkey.currentText().strip():
-            QMessageBox.warning(self, "Error", "El hotkey no puede estar vacío.")
+            QMessageBox.warning(self, "Error", _t("launcher_hotkey_empty_error"))
             return
         self.accept()
 
@@ -223,19 +228,19 @@ class InstanceRow(QFrame):
 
         self._btn_play = QPushButton("▶")
         self._btn_play.setFixedSize(32, 32)
-        self._btn_play.setToolTip("Iniciar")
+        self._btn_play.setToolTip(_t("launcher_btn_start"))
         self._btn_play.clicked.connect(self._play)
         row.addWidget(self._btn_play)
 
         self._btn_stop = QPushButton("⏹")
         self._btn_stop.setFixedSize(32, 32)
-        self._btn_stop.setToolTip("Detener")
+        self._btn_stop.setToolTip(_t("launcher_btn_stop"))
         self._btn_stop.clicked.connect(self._stop)
         row.addWidget(self._btn_stop)
 
         btn_del = QPushButton("🗑")
         btn_del.setFixedSize(32, 32)
-        btn_del.setToolTip("Eliminar")
+        btn_del.setToolTip(_t("launcher_btn_delete"))
         btn_del.clicked.connect(self._remove)
         row.addWidget(btn_del)
 
@@ -266,7 +271,7 @@ class InstanceRow(QFrame):
 class LauncherWindow(QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Giselo Launcher")
+        self.setWindowTitle(_t("launcher_title"))
         self.setMinimumWidth(500)
         self.setMinimumHeight(300)
         self.setStyleSheet("background: #181825; color: #cdd6f4;")
@@ -276,11 +281,11 @@ class LauncherWindow(QWidget):
         root.setSpacing(12)
 
         header = QHBoxLayout()
-        title = QLabel("Giselo Launcher")
+        title = QLabel(_t("launcher_title"))
         title.setFont(QFont("Sans", 14, QFont.Weight.Bold))
         header.addWidget(title)
         header.addStretch()
-        btn_create = QPushButton("+ Crear instancia")
+        btn_create = QPushButton(_t("launcher_create_btn"))
         btn_create.setStyleSheet(
             "QPushButton { background: #89b4fa; color: #1e1e2e; border-radius: 5px; "
             "padding: 6px 14px; font-weight: bold; }"
@@ -329,7 +334,7 @@ class LauncherWindow(QWidget):
         self._list_layout.addStretch() if stretch else self._list_layout.addStretch()
 
         if not self._instances:
-            empty = QLabel("Sin instancias. Haz clic en '+ Crear instancia'.")
+            empty = QLabel(_t("launcher_empty"))
             empty.setStyleSheet("color: #6c7086; font-size: 12px;")
             empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self._list_layout.insertWidget(0, empty)
@@ -356,7 +361,7 @@ class LauncherWindow(QWidget):
 
 def main():
     app = QApplication(sys.argv)
-    app.setApplicationName("Giselo Launcher")
+    app.setApplicationName(_t("launcher_title"))
     win = LauncherWindow()
     win.show()
     sys.exit(app.exec())
