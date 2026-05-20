@@ -6,13 +6,16 @@ import pathlib
 import anthropic
 
 from .backends.base import Backend
+from .backends.claude_api_mcp import ClaudeApiMcpBackend
 from .backends.claude_cli import ClaudeCliBackend
 from .backends.codex import CodexBackend
 from .backends.generic_cli import GenericCliBackend
 from .backends.moonshot import MoonshotBackend
+from .backends.openai_compat import OpenAICompatBackend
 from .backends.opencode import OpenCodeBackend
 from .registry import BackendRegistry
 from . import skills as skills_mod
+from . import i18n as _i18n
 
 log = logging.getLogger(__name__)
 
@@ -49,6 +52,7 @@ class Assistant:
         self._backend: Backend = self._build_by_id(self._active_id)
         self._failover_tried: set[str] = set()
         log.info("Backend activo: %s", self._backend.name)
+        self._language: str = "es"
 
     # ------------------------------------------------------------------ build
 
@@ -72,6 +76,10 @@ class Assistant:
             return OpenCodeBackend(self._cfg)
         if btype == "moonshot":
             return MoonshotBackend(self._cfg, entry)
+        if btype == "claude_api_mcp":
+            return ClaudeApiMcpBackend(self._cfg, entry)
+        if btype == "openai_compat":
+            return OpenAICompatBackend(self._cfg, entry)
         return GenericCliBackend(self._cfg, entry)
 
     # ------------------------------------------------------------------ prompt
@@ -80,8 +88,13 @@ class Assistant:
         self._memory_text = memory_text
         self.system_prompt = self._build_prompt()
 
+    def set_language(self, lang: str) -> None:
+        self._language = lang
+        _i18n.set_lang(lang)
+        self.system_prompt = self._build_prompt()
+
     def _build_prompt(self) -> str:
-        parts = []
+        parts = [_i18n.t("lang_instruction")]
         if self._memory_text:
             parts.append(self._memory_text)
         parts.append(self._base_prompt)
@@ -105,27 +118,28 @@ class Assistant:
     def enable_skill(self, name: str) -> str:
         match = self._find_skill(name)
         if not match:
-            return f"Skill '{name}' no encontrada. Disponibles: {', '.join(self._available_skills)}"
+            return _i18n.t("skill_not_found", name=name, list=", ".join(self._available_skills))
         if match in self._enabled_skills:
-            return f"Skill '{match}' ya estaba activa."
+            return _i18n.t("skill_already_on", name=match)
         self._enabled_skills.append(match)
         self.system_prompt = self._build_prompt()
-        return f"Skill '{match}' activada."
+        return _i18n.t("skill_enabled", name=match)
 
     def disable_skill(self, name: str) -> str:
         match = self._find_skill(name)
         if not match:
-            return f"Skill '{name}' no encontrada. Disponibles: {', '.join(self._available_skills)}"
+            return _i18n.t("skill_not_found", name=name, list=", ".join(self._available_skills))
         if match not in self._enabled_skills:
-            return f"Skill '{match}' ya estaba desactivada."
+            return _i18n.t("skill_already_off", name=match)
         self._enabled_skills.remove(match)
         self.system_prompt = self._build_prompt()
-        return f"Skill '{match}' desactivada."
+        return _i18n.t("skill_disabled", name=match)
 
     def list_skills(self) -> str:
-        enabled = ", ".join(self._enabled_skills) or "ninguna"
-        disabled = ", ".join(s for s in self._available_skills if s not in self._enabled_skills) or "ninguna"
-        return f"Skills activas: {enabled}. Desactivadas: {disabled}."
+        none_str = _i18n.t("skills_none")
+        enabled = ", ".join(self._enabled_skills) or none_str
+        disabled = ", ".join(s for s in self._available_skills if s not in self._enabled_skills) or none_str
+        return _i18n.t("skills_list", enabled=enabled, disabled=disabled)
 
     # ------------------------------------------------------------------ control
 
@@ -137,12 +151,12 @@ class Assistant:
         entry = self._registry.get(name)
         if entry is None and name not in _BUILTIN:
             available = ", ".join(self._registry.ids())
-            return f"Backend '{name}' no disponible. Registrados: {available}"
+            return _i18n.t("backend_not_found", name=name, list=available)
         self._active_id = name
         self._backend = self._build_by_id(name)
         self._failover_tried.clear()
         log.info("Backend cambiado a: %s", self._backend.name)
-        return f"Ahora uso {self._backend.name}."
+        return _i18n.t("backend_switched", name=self._backend.name)
 
     @property
     def current_backend_name(self) -> str:
@@ -165,7 +179,7 @@ class Assistant:
             if e["id"] not in self._failover_tried
         ]
         if not candidates:
-            return "[crowia] Todos los backends alcanzaron su límite. Sin respuesta."
+            return _i18n.t("all_rate_limited")
 
         next_entry = candidates[0]
         old_name = self._backend.name
@@ -185,7 +199,7 @@ class Assistant:
         if self._is_rate_limit(response):
             return self._failover_ask(text, history, image_path, file_paths, on_chunk)
 
-        return f"[Límite alcanzado en {old_name}, respondiendo con {self._backend.name}]\n\n{response}"
+        return _i18n.t("failover_prefix", old=old_name, new=self._backend.name) + "\n\n" + response
 
     # ------------------------------------------------------------------ ask
 
@@ -197,6 +211,15 @@ class Assistant:
         file_paths: list[pathlib.Path] | None = None,
         on_chunk=None,
     ) -> str:
+        # Promote image files from file_paths to vision API path
+        _IMG_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
+        if not image_path and file_paths:
+            img_files = [fp for fp in file_paths if pathlib.Path(fp).suffix.lower() in _IMG_EXTS]
+            text_files = [fp for fp in file_paths if pathlib.Path(fp).suffix.lower() not in _IMG_EXTS]
+            if img_files:
+                image_path = pathlib.Path(img_files[0])
+                file_paths = (img_files[1:] + text_files) or None
+
         if image_path and image_path.exists():
             return self._ask_vision_api(text, history, image_path, file_paths)
 
@@ -230,13 +253,27 @@ class Assistant:
             "type": "image",
             "source": {"type": "base64", "media_type": "image/png", "data": img_data},
         })
+        _IMG_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
+        _IMG_MIME = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif",
+                     ".webp": "image/webp"}
         if file_paths:
             for fp in file_paths:
-                try:
-                    file_text = fp.read_text(encoding="utf-8", errors="replace")
-                    content.append({"type": "text", "text": f"[Archivo: {fp}]\n```\n{file_text}\n```\n"})
-                except Exception as exc:
-                    log.warning("Cannot read %s: %s", fp, exc)
+                fp = pathlib.Path(fp)
+                ext = fp.suffix.lower()
+                if ext in _IMG_EXTS:
+                    try:
+                        mime = _IMG_MIME.get(ext, "image/png")
+                        img2 = base64.standard_b64encode(fp.read_bytes()).decode()
+                        content.append({"type": "image",
+                                        "source": {"type": "base64", "media_type": mime, "data": img2}})
+                    except Exception as exc:
+                        log.warning("Cannot read image %s: %s", fp, exc)
+                else:
+                    try:
+                        file_text = fp.read_text(encoding="utf-8", errors="replace")
+                        content.append({"type": "text", "text": f"[Archivo: {fp}]\n```\n{file_text}\n```\n"})
+                    except Exception as exc:
+                        log.warning("Cannot read %s: %s", fp, exc)
         content.append({"type": "text", "text": text})
         messages = list(history or []) + [{"role": "user", "content": content}]
         try:

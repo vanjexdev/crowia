@@ -11,6 +11,8 @@ DEFAULTS: dict = {
     "right_panel_visible": True,
     "splitter_sizes_h": [340, 720],
     "splitter_sizes_v": [340, 600],
+    "ui_scale": 1.0,
+    "language": "es",
 }
 
 

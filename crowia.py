@@ -3,6 +3,7 @@ import argparse
 import asyncio
 import datetime
 import logging
+import os
 import pathlib
 import sys
 import threading
@@ -20,6 +21,8 @@ from crowia.history import ConversationHistory
 from crowia.memory import MemoryManager
 from crowia.always_on import AlwaysOnListener
 from crowia import intent, screen, system_control
+from crowia import i18n as _i18n
+from crowia.i18n import t as _t
 
 
 def setup_logging(debug: bool = False):
@@ -69,6 +72,9 @@ def main():
     cfg = load_config(args.config)
     log = logging.getLogger("crowia")
 
+    from crowia import prefs as _prefs_mod_main
+    _i18n.set_lang(_prefs_mod_main.load().get("language", "es"))
+
     if args.backend:
         cfg["backend"] = args.backend
     if args.hotkey:
@@ -84,6 +90,10 @@ def main():
             from PyQt6.QtWidgets import QApplication
             from PyQt6.QtCore import QTimer
             from crowia.ui import CrowiaOverlay
+            from crowia import prefs as _prefs_mod
+            _ui_scale = _prefs_mod.load().get("ui_scale", 1.0)
+            if _ui_scale != 1.0:
+                os.environ["QT_SCALE_FACTOR"] = str(_ui_scale)
             qt_app = QApplication(sys.argv)
             overlay = CrowiaOverlay(cfg=cfg)
             overlay.show()
@@ -109,6 +119,7 @@ def main():
     assistant = Assistant(cfg)
     memory = MemoryManager()
     assistant.set_memory_context(memory.build_memory_prompt())
+    assistant.set_language(_i18n.get_lang())
 
     def _save_memory():
         msgs = history.get_messages()
@@ -120,6 +131,7 @@ def main():
 
     def on_cancel():
         log.info("Cancel requested")
+        _cancel_flag.set()
         assistant.cancel()
         if overlay:
             overlay.notify("idle")
@@ -142,6 +154,18 @@ def main():
 
         overlay.backend_changed.connect(_on_backend_changed)
 
+        def _on_scale_changed(scale: float):
+            output.show("Giselo", _t("scale_saved", pct=int(scale * 100)))
+
+        overlay.scale_changed.connect(_on_scale_changed)
+
+        def _on_language_changed(lang: str):
+            _i18n.set_lang(lang)
+            assistant.set_language(lang)
+            output.show("Giselo", _t("lang_saved"))
+
+        overlay.language_changed.connect(_on_language_changed)
+
     history_cfg = cfg.get("history", {})
     history = ConversationHistory(
         path=pathlib.Path(history_cfg.get("path", "/tmp/crowia/history.json")),
@@ -150,6 +174,7 @@ def main():
 
     pipeline_lock = threading.Lock()
     safety_timer: threading.Timer | None = None
+    _cancel_flag = threading.Event()
 
     def ui(state: str):
         if overlay:
@@ -178,14 +203,14 @@ def main():
             output.set_tts(False)
             if overlay:
                 overlay.set_tts_state(False)
-            output.show("Giselo", "Audio desactivado.")
+            output.show("Giselo", _t("audio_disabled"))
             ui("done")
             return True
         if intents.tts_unmute:
             output.set_tts(True)
             if overlay:
                 overlay.set_tts_state(True)
-            output.show("Giselo", "Audio activado.")
+            output.show("Giselo", _t("audio_enabled"))
             ui("done")
             return True
         if intents.skill_disable:
@@ -202,7 +227,7 @@ def main():
             return True
         if intents.clear_history:
             history.clear()
-            output.show("Crowia", "Historial borrado.")
+            output.show("Crowia", _t("history_cleared"))
             ui("done")
             return True
         if intents.media is not None:
@@ -217,6 +242,7 @@ def main():
 
     def _run_text_pipeline(text: str, extra_files: list[pathlib.Path] | None = None):
         """Shared pipeline for voice transcription and typed text input."""
+        _cancel_flag.clear()
         ui("processing")
         log.info("Text pipeline: %s", text)
         intents = intent.detect(text)
@@ -226,14 +252,18 @@ def main():
 
         screenshot_path = None
         if intents.screenshot:
-            output.show_status("Capturando pantalla…")
+            output.show_status(_t("taking_screenshot"))
             screenshot_path = screen.take_screenshot()
 
         file_paths = list(intents.files or [])
         if extra_files:
             file_paths.extend(extra_files)
 
-        output.show_status(f"Preguntando a {assistant.current_backend_name}: {text[:50]}…")
+        output.show_status(_t("asking_backend", backend=assistant.current_backend_name, text=text[:50]))
+        ui("thinking")
+        if overlay:
+            overlay.add_user_message(text, [str(f) for f in file_paths] if file_paths else [])
+            overlay.set_response(_t("thinking"))
 
         def _on_chunk(partial: str):
             if overlay:
@@ -256,6 +286,9 @@ def main():
             if screenshot_path and screenshot_path.exists():
                 screenshot_path.unlink(missing_ok=True)
 
+        if _cancel_flag.is_set():
+            return
+
         if intents.volume is not None:
             system_control.control_volume(intents.volume)
 
@@ -263,7 +296,7 @@ def main():
         history.add("assistant", response)
         output.show(text, response)
         if overlay:
-            overlay.set_response(response)
+            overlay.finalize_response(response)
         ui("done")
 
     def _on_text_submitted(text: str, file_strs: list):
@@ -276,7 +309,7 @@ def main():
     def _handle_save_memory():
         msgs = history.get_messages()
         if not msgs:
-            output.show("Crowia", "No hay historial que recordar.")
+            output.show("Crowia", _t("no_history_memory"))
             return
         mem_dir = pathlib.Path.home() / ".config/crowia/memories"
         mem_dir.mkdir(parents=True, exist_ok=True)
@@ -284,12 +317,12 @@ def main():
         mem_file = mem_dir / f"memory_{ts}.txt"
         lines = [f"[{m.get('role','?')}]\n{m.get('content','')}\n" for m in msgs]
         mem_file.write_text("\n".join(lines), encoding="utf-8")
-        output.show("Crowia", f"Memoria guardada: {mem_file.name}")
+        output.show("Crowia", _t("memory_saved", name=mem_file.name))
 
     def _handle_export_summary():
         msgs = history.get_messages()
         if not msgs:
-            output.show("Crowia", "No hay historial que exportar.")
+            output.show("Crowia", _t("no_history_export"))
             return
         ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         export_dir = pathlib.Path.home() / "Documents" / "crowia_exports"
@@ -297,7 +330,7 @@ def main():
         export_file = export_dir / f"chat_{ts}.txt"
         lines = [f"--- {m.get('role','?').upper()} ---\n{m.get('content','')}\n" for m in msgs]
         export_file.write_text("\n".join(lines), encoding="utf-8")
-        output.show("Crowia", f"Exportado: {export_file}")
+        output.show("Crowia", _t("exported", path=export_file))
 
     if overlay:
         overlay.text_submitted.connect(_on_text_submitted)
@@ -310,7 +343,7 @@ def main():
             log.warning("No WAV file after recording")
             return
 
-        output.show_status("Transcribiendo…")
+        output.show_status(_t("transcribing"))
         try:
             text = transcriber.transcribe(wav)
         except Exception as e:
@@ -322,7 +355,7 @@ def main():
             recorder.cleanup(wav)
 
         if not text:
-            output.show_status("No se escuchó nada.")
+            output.show_status(_t("nothing_heard"))
             ui("idle")
             return
 
