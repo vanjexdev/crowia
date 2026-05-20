@@ -98,6 +98,7 @@ class Recorder:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE,
             stdin=subprocess.DEVNULL,
+            bufsize=0,
         )
 
     def _stop_macos(self):
@@ -117,7 +118,7 @@ class Recorder:
                 self._proc.wait()
         stderr_text = self._proc.stderr.read().decode(errors="replace") if self._proc.stderr else ""
         if stderr_text:
-            log.debug("ffmpeg stderr (tail): %s", stderr_text[-300:].strip())
+            log.info("ffmpeg stderr: %s", stderr_text[-400:].strip())
         self._proc = None
 
     # ── sounddevice (fallback) ─────────────────────────────────────────────────
