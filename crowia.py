@@ -141,6 +141,7 @@ def main():
             overlay.notify("idle")
 
     output = OutputHandler(cfg)
+    output.set_language(_i18n.get_lang())
 
     if overlay:
         overlay._on_cancel = on_cancel
@@ -166,6 +167,7 @@ def main():
         def _on_language_changed(lang: str):
             _i18n.set_lang(lang)
             assistant.set_language(lang)
+            output.set_language(lang)
             output.show("Giselo", _t("lang_saved"))
 
         overlay.language_changed.connect(_on_language_changed)

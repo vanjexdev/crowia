@@ -7,6 +7,32 @@ import threading
 
 log = logging.getLogger(__name__)
 
+_say_voice_cache: dict[str, str | None] = {}
+
+
+def _best_say_voice(lang: str) -> str | None:
+    """Return best `say -v` voice for lang (ISO 639-1). Cached after first call."""
+    key = lang[:2].lower()
+    if key in _say_voice_cache:
+        return _say_voice_cache[key]
+    voice = None
+    try:
+        result = subprocess.run(["say", "-v", "?"], capture_output=True, text=True, timeout=5)
+        if result.returncode == 0:
+            for line in result.stdout.splitlines():
+                parts = line.split()
+                if len(parts) >= 2:
+                    locale = parts[1] if len(parts) >= 2 else ""
+                    if locale.lower().startswith(key + "_"):
+                        voice = parts[0]
+                        break
+    except Exception:
+        pass
+    _say_voice_cache[key] = voice
+    if voice:
+        log.debug("say voice for '%s': %s", key, voice)
+    return voice
+
 
 def _strip_markdown(text: str) -> str:
     text = re.sub(r'\*\*(.+?)\*\*', r'\1', text)
@@ -64,10 +90,14 @@ class OutputHandler:
         self.response_file = pathlib.Path(out["response_file"])
         self.tts_enabled = out["tts_enabled"]
         self.tts_command = out["tts_command"]
+        self._lang = "es"
         self._last_notif_id: str | None = None
         self._tts_lock = threading.Lock()
         self._piper_proc: subprocess.Popen | None = None
         self._aplay_proc: subprocess.Popen | None = None
+
+    def set_language(self, lang: str):
+        self._lang = lang[:2].lower()
 
     def stop_tts(self):
         with self._tts_lock:
@@ -176,7 +206,12 @@ class OutputHandler:
         """Fallback: say (macOS) or espeak (Linux)."""
         try:
             if sys.platform == "darwin":
-                subprocess.run(["say", text], timeout=60, check=False)
+                cmd = ["say"]
+                voice = _best_say_voice(self._lang)
+                if voice:
+                    cmd += ["-v", voice]
+                cmd.append(text)
+                subprocess.run(cmd, timeout=60, check=False)
             else:
                 subprocess.run(["espeak", text], timeout=60, check=False,
                                capture_output=True)
