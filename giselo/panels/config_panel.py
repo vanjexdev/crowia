@@ -108,6 +108,19 @@ def _add_row(layout: QVBoxLayout, label: str, widget: QWidget) -> None:
     layout.insertWidget(layout.count() - 1, row)
 
 
+def _list_input_devices() -> list[str]:
+    """Return ['default'] + names of all sounddevice input devices."""
+    try:
+        import sounddevice as sd
+        devices = sd.query_devices()
+        names = ["default"] + [
+            d["name"] for d in devices if d["max_input_channels"] > 0
+        ]
+        return names
+    except Exception:
+        return ["default"]
+
+
 def build(layout: QVBoxLayout) -> None:
     try:
         cfg = _load()
@@ -117,6 +130,15 @@ def build(layout: QVBoxLayout) -> None:
         lbl.setWordWrap(True)
         layout.insertWidget(layout.count() - 1, lbl)
         return
+
+    # ── Micrófono ─────────────────────────────────────────────────────────────
+    _section_title(layout, "Micrófono")
+    mic_devices  = _list_input_devices()
+    current_mic  = cfg.get("audio", {}).get("device", "default")
+    mic_combo    = _combo(mic_devices, current_mic if current_mic in mic_devices else "default")
+    _add_row(layout, "dispositivo", mic_combo)
+
+    _sep(layout)
 
     # ── TTS ──────────────────────────────────────────────────────────────────
     _section_title(layout, "TTS")
@@ -217,6 +239,7 @@ def build(layout: QVBoxLayout) -> None:
 
     def _on_save():
         try:
+            cfg["audio"]["device"]        = mic_combo.currentText()
             cfg["output"]["tts_enabled"]  = tts_toggle.isChecked()
             cfg["whisper"]["model"]       = wh_model.currentText()
             cfg["whisper"]["language"]    = wh_lang.text().strip() or None

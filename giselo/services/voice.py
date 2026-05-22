@@ -12,14 +12,15 @@ class _VADThread(threading.Thread):
 
     def __init__(self, on_silence, rate: int = 16000,
                  silence_ms: int = 1000, min_speech_ms: int = 400,
-                 aggressiveness: int = 2):
+                 aggressiveness: int = 2, device: str | None = None):
         super().__init__(daemon=True)
-        self._on_silence    = on_silence
-        self._rate          = rate
-        self._silence_ms    = silence_ms
-        self._min_speech_ms = min_speech_ms
+        self._on_silence     = on_silence
+        self._rate           = rate
+        self._silence_ms     = silence_ms
+        self._min_speech_ms  = min_speech_ms
         self._aggressiveness = aggressiveness
-        self._stop_ev       = threading.Event()
+        self._device         = _sd_device(device)
+        self._stop_ev        = threading.Event()
 
     def run(self) -> None:
         try:
@@ -64,7 +65,7 @@ class _VADThread(threading.Thread):
                         self._on_silence()
 
         try:
-            with sd.InputStream(samplerate=self._rate, channels=1,
+            with sd.InputStream(samplerate=self._rate, channels=1, device=self._device,
                                 dtype="int16", blocksize=frame_samples,
                                 callback=_cb):
                 self._stop_ev.wait()
@@ -101,11 +102,19 @@ class _TranscribeWorker(QThread):
             self.error.emit(str(e))
 
 
+def _sd_device(cfg_device: str | None):
+    """Map config device string to sounddevice device param (None = system default)."""
+    if not cfg_device or cfg_device == "default":
+        return None
+    return cfg_device
+
+
 class _LevelThread(threading.Thread):
-    def __init__(self, on_level, rate: int = 16000):
+    def __init__(self, on_level, rate: int = 16000, device: str | None = None):
         super().__init__(daemon=True)
         self._on_level = on_level
         self._rate = rate
+        self._device = _sd_device(device)
         self._stop = threading.Event()
 
     def run(self) -> None:
@@ -117,7 +126,7 @@ class _LevelThread(threading.Thread):
                 level = min(100, int(rms * 600))
                 self._on_level(level)
 
-            with sd.InputStream(samplerate=self._rate, channels=1,
+            with sd.InputStream(samplerate=self._rate, channels=1, device=self._device,
                                 dtype="int16", blocksize=1024, callback=_cb):
                 self._stop.wait()
         except Exception as e:
@@ -168,16 +177,20 @@ class VoiceService(QObject):
             return
         self._recording = True
         self._wav_path = self._recorder.start()
-        self._level_thread = _LevelThread(self._emit_level)
+        audio_cfg  = self._cfg.get("audio", {})
+        cfg_device = audio_cfg.get("device", "default")
+        rate       = audio_cfg.get("rate", 16000)
+        self._level_thread = _LevelThread(self._emit_level, rate=rate, device=cfg_device)
         self._level_thread.start()
         if auto_stop:
             ao = self._cfg.get("always_on", {})
             self._vad_thread = _VADThread(
                 on_silence=self._vad_silence.emit,
-                rate=self._cfg.get("audio", {}).get("rate", 16000),
+                rate=rate,
                 silence_ms=ao.get("silence_duration_ms", 1000),
                 min_speech_ms=ao.get("min_speech_ms", 400),
                 aggressiveness=ao.get("vad_aggressiveness", 2),
+                device=cfg_device,
             )
             self._vad_thread.start()
         self.started.emit()
