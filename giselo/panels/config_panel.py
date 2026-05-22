@@ -109,37 +109,57 @@ def _add_row(layout: QVBoxLayout, label: str, widget: QWidget) -> None:
 
 
 def _list_input_devices() -> list[tuple[str, str]]:
-    """Return [(display_name, device_key)] for all real input sources.
-    display_name = human-friendly label. device_key = what gets stored in config.
+    """Return [(display_name, sounddevice_key)].
+    Uses pactl alsa.card to map hw:X device names to friendly descriptions.
+    Webcam/Bluetooth only reachable via 'pipewire' device.
     """
-    items: list[tuple[str, str]] = [("default (sistema)", "default")]
+    # Build alsa_card_number → friendly description via pactl
+    card_desc: dict[int, str] = {}
     try:
-        import subprocess, re
+        import subprocess, re as _re
         r = subprocess.run(["pactl", "list", "sources"],
                            capture_output=True, text=True, timeout=3)
         if r.returncode == 0:
-            name = None
+            name = desc = card = None
             for line in r.stdout.splitlines():
-                line = line.strip()
-                m_name = re.match(r'Name:\s+(.+)', line)
-                m_desc = re.match(r'Description:\s+(.+)', line)
-                if m_name:
-                    name = m_name.group(1).strip()
-                elif m_desc and name:
-                    desc = m_desc.group(1).strip()
-                    if not name.endswith(".monitor") and "Monitor of" not in desc:
-                        items.append((desc, name))
-                    name = None
-            if len(items) > 1:
-                return items
+                s = line.strip()
+                if _re.match(r'Name:', s):
+                    name = s.split(":", 1)[1].strip()
+                elif _re.match(r'Description:', s):
+                    desc = s.split(":", 1)[1].strip()
+                elif _re.match(r'alsa\.card\s*=', s):
+                    m = _re.search(r'"(\d+)"', s)
+                    if m:
+                        card = int(m.group(1))
+                elif s == "" and name:
+                    if card is not None and desc and not name.endswith(".monitor"):
+                        card_desc[card] = desc
+                    name = desc = card = None
     except Exception:
         pass
-    # fallback: sounddevice names
+
+    items: list[tuple[str, str]] = [("default (sistema)", "default")]
     try:
-        import sounddevice as sd
+        import sounddevice as sd, re as _re
+        seen: set[str] = set()
         for d in sd.query_devices():
-            if d["max_input_channels"] > 0:
-                items.append((d["name"], d["name"]))
+            if d["max_input_channels"] <= 0:
+                continue
+            sd_name = d["name"]
+            if sd_name in seen or sd_name in ("default", "sysdefault"):
+                continue
+            seen.add(sd_name)
+            if sd_name == "pipewire":
+                display = "PipeWire  –  webcam / bluetooth / predeterminado sistema"
+            elif sd_name == "pulse":
+                display = "PulseAudio  –  predeterminado sistema"
+            else:
+                m = _re.search(r'\(hw:(\d+)', sd_name)
+                if m and int(m.group(1)) in card_desc:
+                    display = f"{card_desc[int(m.group(1))]}  (hw:{m.group(1)})"
+                else:
+                    display = sd_name
+            items.append((display, sd_name))
     except Exception:
         pass
     return items
