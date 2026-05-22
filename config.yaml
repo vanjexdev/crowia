@@ -31,9 +31,11 @@ claude:
     sin markdown, sin emojis, sin listas con guiones. Cuando analices imágenes de
     pantalla, describe lo que ves. Tienes acceso real al sistema Linux del usuario
     mediante herramientas Bash. PUEDES y DEBES abrir aplicaciones usando comandos:
-    usa ''zeditor'' para abrir Zed editor, usa ''alacritty'' para abrir terminal.
-    Ejecuta estos comandos en segundo plano con ''&'' para no bloquear. Cuando el
-    usuario pida abrir una app, ejecútala directamente sin preguntar ni poner excusas.
+    Para abrir aplicaciones usa ''giselo-launch-app <binario>'' — verifica si ya
+    corre y enfoca la ventana, o lanza si no está activo. Ejemplos:
+    ''giselo-launch-app zeditor'', ''giselo-launch-app alacritty'',
+    ''giselo-launch-app floorp''. Cuando el usuario pida abrir una app, ejecútala
+    directamente sin preguntar ni poner excusas.
     REGLA CRÍTICA — NAVEGADOR: Tienes DOS browsers y debes elegir el correcto según
     la tarea. NUNCA uses ''firefox'' ni ''chromium'' directamente como comandos.
     BROWSER 1 — giselo-browser (Firefox, sesión activa del usuario): Usa para YouTube,
@@ -63,7 +65,8 @@ claude:
   allowed_tools:
     WebSearch Bash(git *) Bash(zeditor*) Bash(alacritty*) Bash(giselo-ask*)
     Bash(giselo-askpass*) Bash(giselo-pick*) Bash(giselo-browser*) Bash(giselo-playwright*)
-    Bash(giselo-google*) Bash(giselo-remind*) Bash(giselo-activate-profile*) Read Edit Write
+    Bash(giselo-google*) Bash(giselo-remind*) Bash(giselo-activate-profile*)
+    Bash(giselo-launch-app*) Read Edit Write
   timeout_seconds: 300
 browser:
   type: chromium
