@@ -108,17 +108,41 @@ def _add_row(layout: QVBoxLayout, label: str, widget: QWidget) -> None:
     layout.insertWidget(layout.count() - 1, row)
 
 
-def _list_input_devices() -> list[str]:
-    """Return ['default'] + names of all sounddevice input devices."""
+def _list_input_devices() -> list[tuple[str, str]]:
+    """Return [(display_name, device_key)] for all real input sources.
+    display_name = human-friendly label. device_key = what gets stored in config.
+    """
+    items: list[tuple[str, str]] = [("default (sistema)", "default")]
+    try:
+        import subprocess, re
+        r = subprocess.run(["pactl", "list", "sources"],
+                           capture_output=True, text=True, timeout=3)
+        if r.returncode == 0:
+            name = None
+            for line in r.stdout.splitlines():
+                line = line.strip()
+                m_name = re.match(r'Name:\s+(.+)', line)
+                m_desc = re.match(r'Description:\s+(.+)', line)
+                if m_name:
+                    name = m_name.group(1).strip()
+                elif m_desc and name:
+                    desc = m_desc.group(1).strip()
+                    if not name.endswith(".monitor") and "Monitor of" not in desc:
+                        items.append((desc, name))
+                    name = None
+            if len(items) > 1:
+                return items
+    except Exception:
+        pass
+    # fallback: sounddevice names
     try:
         import sounddevice as sd
-        devices = sd.query_devices()
-        names = ["default"] + [
-            d["name"] for d in devices if d["max_input_channels"] > 0
-        ]
-        return names
+        for d in sd.query_devices():
+            if d["max_input_channels"] > 0:
+                items.append((d["name"], d["name"]))
     except Exception:
-        return ["default"]
+        pass
+    return items
 
 
 def build(layout: QVBoxLayout) -> None:
@@ -133,9 +157,31 @@ def build(layout: QVBoxLayout) -> None:
 
     # ── Micrófono ─────────────────────────────────────────────────────────────
     _section_title(layout, "Micrófono")
-    mic_devices  = _list_input_devices()
-    current_mic  = cfg.get("audio", {}).get("device", "default")
-    mic_combo    = _combo(mic_devices, current_mic if current_mic in mic_devices else "default")
+    mic_devices  = _list_input_devices()           # [(display, key), ...]
+    current_mic  = cfg.get("audio", {}).get("monitor_device", "default")
+
+    mic_combo = QComboBox()
+    mic_combo.setStyleSheet(f"""
+        QComboBox {{
+            background: rgba(15,26,46,0.8); color: {INK};
+            border: 1px solid rgba(93,107,133,0.4); border-radius: 4px;
+            font-size: 10px; font-family: 'JetBrains Mono', monospace;
+            padding: 2px 6px;
+        }}
+        QComboBox::drop-down {{ border: none; width: 16px; }}
+        QComboBox QAbstractItemView {{
+            background: #0f1a2e; color: {INK};
+            selection-background-color: rgba(136,201,58,0.15);
+        }}
+    """)
+    for display, key in mic_devices:
+        mic_combo.addItem(display, userData=key)
+    # Select current saved device
+    for i in range(mic_combo.count()):
+        if mic_combo.itemData(i) == current_mic:
+            mic_combo.setCurrentIndex(i)
+            break
+
     _add_row(layout, "dispositivo", mic_combo)
 
     _sep(layout)
@@ -239,7 +285,9 @@ def build(layout: QVBoxLayout) -> None:
 
     def _on_save():
         try:
-            cfg["audio"]["device"]        = mic_combo.currentText()
+            if "audio" not in cfg:
+                cfg["audio"] = {}
+            cfg["audio"]["monitor_device"] = mic_combo.currentData()
             cfg["output"]["tts_enabled"]  = tts_toggle.isChecked()
             cfg["whisper"]["model"]       = wh_model.currentText()
             cfg["whisper"]["language"]    = wh_lang.text().strip() or None

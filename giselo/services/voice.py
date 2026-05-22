@@ -178,7 +178,7 @@ class VoiceService(QObject):
         self._recording = True
         self._wav_path = self._recorder.start()
         audio_cfg  = self._cfg.get("audio", {})
-        cfg_device = audio_cfg.get("device", "default")
+        cfg_device = audio_cfg.get("monitor_device") or audio_cfg.get("device", "default")
         rate       = audio_cfg.get("rate", 16000)
         self._level_thread = _LevelThread(self._emit_level, rate=rate, device=cfg_device)
         self._level_thread.start()
