@@ -88,14 +88,14 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
 #tab-dock {{
     background: {CHROME};
     border-bottom: 1px solid {INK};
-    min-height: 38px;
-    max-height: 38px;
+    min-height: 44px;
+    max-height: 44px;
 }}
 QPushButton[tabButton="true"] {{
-    background: transparent;
+    background: {CHROME};
     color: {MUTE};
     border: 1px solid {INK};
-    border-bottom: none;
+    border-bottom: 1px solid {CHROME};
     border-radius: 6px 6px 0 0;
     padding: 4px 10px;
     font-size: 11px;
@@ -112,10 +112,10 @@ QPushButton[tabActive="true"] {{
     border-bottom: 1px solid {PANEL};
 }}
 QPushButton[tabAdd="true"] {{
-    background: transparent;
+    background: {CHROME};
     color: {MUTE};
     border: 1px solid rgba(93,107,133,0.45);
-    border-bottom: none;
+    border-bottom: 1px solid {CHROME};
     border-radius: 6px 6px 0 0;
     padding: 4px 10px;
     font-size: 11px;

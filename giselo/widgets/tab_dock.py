@@ -16,13 +16,12 @@ class TabDock(QWidget):
     def __init__(self, instances: list[str], active: str, parent=None):
         super().__init__(parent)
         self.setObjectName("tab-dock")
-        self.setFixedHeight(38)
+        self.setFixedHeight(44)
         self._buttons: dict[str, QPushButton] = {}
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(8, 4, 8, 0)
+        layout.setContentsMargins(8, 0, 8, 0)
         layout.setSpacing(2)
-        layout.setAlignment(__import__("PyQt6.QtCore", fromlist=["Qt"]).Qt.AlignmentFlag.AlignBottom)
 
         for inst in instances:
             btn = self._make_tab(inst)
@@ -31,7 +30,7 @@ class TabDock(QWidget):
 
         add_btn = QPushButton("+ instancia")
         add_btn.setProperty("tabAdd", True)
-        add_btn.setFixedHeight(28)
+        add_btn.setFixedHeight(44)
         add_btn.setCursor(__import__("PyQt6.QtCore", fromlist=["Qt"]).Qt.CursorShape.PointingHandCursor)
         layout.addWidget(add_btn)
         layout.addStretch()
@@ -43,7 +42,7 @@ class TabDock(QWidget):
         dot  = "●"
         btn  = QPushButton(f"{dot} {name}  {meta['shortcut']}")
         btn.setProperty("tabButton", True)
-        btn.setFixedHeight(28)
+        btn.setFixedHeight(44)
         btn.setCursor(__import__("PyQt6.QtCore", fromlist=["Qt"]).Qt.CursorShape.PointingHandCursor)
         btn.clicked.connect(lambda _, n=name: self.instance_changed.emit(n))
         return btn
