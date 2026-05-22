@@ -129,13 +129,13 @@ QPushButton[tabAdd="true"]:hover {{
     background: {RAIL};
     min-width: 44px;
     max-width: 44px;
-    border: 1px solid {INK};
 }}
 QPushButton[railBtn="true"] {{
     background: transparent;
     color: {INK};
-    border: 1px dashed {MUTE};
+    border: 1px solid rgba(93,107,133,0.5);
     border-radius: {RADIUS_CARD};
+    margin: 1px;
     min-width: 32px;
     max-width: 32px;
     min-height: 32px;

@@ -7,7 +7,7 @@ class TitleBar(QWidget):
     def __init__(self, window, parent=None):
         super().__init__(parent)
         self.setObjectName("title-bar")
-        self.window = window
+        self._main_window = window
         self.setFixedHeight(30)
         self._drag_pos: QPoint | None = None
 
@@ -41,9 +41,9 @@ class TitleBar(QWidget):
         hint_fs.setObjectName("title-hint")
         layout.addWidget(hint_fs)
 
-        self._btn_close.clicked.connect(window.close)
-        self._btn_min.clicked.connect(window.showMinimized)
-        self._btn_max.clicked.connect(window.toggle_fullscreen)
+        self._btn_close.clicked.connect(self._main_window.close)
+        self._btn_min.clicked.connect(self._main_window.showMinimized)
+        self._btn_max.clicked.connect(self._main_window.toggle_fullscreen)
 
     def _traffic(self, obj_name: str) -> QPushButton:
         btn = QPushButton()
@@ -59,11 +59,15 @@ class TitleBar(QWidget):
     # ── Drag to move (frameless) ───────────────────────────────────────────
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
-            self._drag_pos = event.globalPosition().toPoint() - self.window.frameGeometry().topLeft()
+            handle = self._main_window.windowHandle()
+            if handle:
+                handle.startSystemMove()
+            else:
+                self._drag_pos = event.globalPosition().toPoint() - self._main_window.frameGeometry().topLeft()
 
     def mouseMoveEvent(self, event):
         if self._drag_pos and event.buttons() & Qt.MouseButton.LeftButton:
-            self.window.move(event.globalPosition().toPoint() - self._drag_pos)
+            self._main_window.move(event.globalPosition().toPoint() - self._drag_pos)
 
     def mouseReleaseEvent(self, event):
         self._drag_pos = None
