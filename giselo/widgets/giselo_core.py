@@ -35,6 +35,8 @@ class GiseloCore(QWidget):
         self.setObjectName("center-widget")
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setMinimumSize(300, 300)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground)
 
         self._state       = "idle"
         self._prev_state  = "idle"
