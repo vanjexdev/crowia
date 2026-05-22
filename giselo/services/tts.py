@@ -1,8 +1,11 @@
 import logging
 import pathlib
 import queue
+import subprocess
 import sys
 from PyQt6.QtCore import QObject, QThread, pyqtSignal
+
+_SCRIPTS = pathlib.Path(__file__).resolve().parents[2] / "scripts"
 
 log = logging.getLogger(__name__)
 
@@ -88,6 +91,20 @@ class TTSService(QObject):
         self._worker: _SpeakWorker | _StreamingTTSWorker | None = None
         self.enabled: bool = cfg["output"]["tts_enabled"]
 
+    def _duck(self) -> None:
+        try:
+            subprocess.run([str(_SCRIPTS / "giselo-audio-duck")],
+                           capture_output=True, timeout=3)
+        except Exception:
+            pass
+
+    def _unduck(self) -> None:
+        try:
+            subprocess.Popen([str(_SCRIPTS / "giselo-audio-unduck")],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
+
     def speak(self, text: str) -> None:
         """Blocking speak — full text at once (fallback / non-streaming path)."""
         try:
@@ -99,10 +116,12 @@ class TTSService(QObject):
         if not self.enabled or not text.strip():
             return
         self.stop()
+        self._duck()
         self._worker = _SpeakWorker(self._handler, text, self)
         self._worker.finished.connect(self.finished)
         self._worker.error.connect(self.error)
         self._worker.finished.connect(self._cleanup)
+        self._worker.finished.connect(self._unduck)
         self._worker.start()
         self.started.emit()
 
@@ -111,10 +130,12 @@ class TTSService(QObject):
         if not self.enabled or not first_sentence.strip():
             return
         self.stop()
+        self._duck()
         self._worker = _StreamingTTSWorker(self._handler, self._tts_cmd, self)
         self._worker.finished.connect(self.finished)
         self._worker.error.connect(self.error)
         self._worker.finished.connect(self._cleanup)
+        self._worker.finished.connect(self._unduck)
         self._worker.enqueue(first_sentence)
         self._worker.start()
         self.started.emit()
@@ -138,6 +159,7 @@ class TTSService(QObject):
                 self._worker.stop()
             if self._worker.isRunning():
                 self._worker.wait(500)
+        self._unduck()
 
     def _cleanup(self) -> None:
         self._worker = None

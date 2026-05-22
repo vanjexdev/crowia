@@ -1,0 +1,28 @@
+#!/home/jesusu/Workspace/agents/crowia/.venv/bin/python3
+"""Restore sink-input volumes saved by giselo-audio-duck."""
+import json
+import pathlib
+import subprocess
+import sys
+
+STATE_FILE = pathlib.Path("/tmp/crowia/duck_state.json")
+
+
+def main():
+    if not STATE_FILE.exists():
+        sys.exit(0)
+    try:
+        state = json.loads(STATE_FILE.read_text())
+    except Exception:
+        STATE_FILE.unlink(missing_ok=True)
+        sys.exit(0)
+
+    for sid, value in state.items():
+        subprocess.run(["pactl", "set-sink-input-volume", sid, str(value)],
+                       capture_output=True)
+
+    STATE_FILE.unlink(missing_ok=True)
+
+
+if __name__ == "__main__":
+    main()

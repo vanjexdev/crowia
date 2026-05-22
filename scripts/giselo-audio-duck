@@ -1,0 +1,40 @@
+#!/home/jesusu/Workspace/agents/crowia/.venv/bin/python3
+"""Lower all active sink-input volumes to DUCK_LEVEL, saving originals."""
+import json
+import pathlib
+import re
+import subprocess
+import sys
+
+DUCK_LEVEL = "25%"
+STATE_FILE = pathlib.Path("/tmp/crowia/duck_state.json")
+
+
+def main():
+    r = subprocess.run(["pactl", "list", "sink-inputs", "short"],
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        sys.exit(0)
+
+    ids = [line.split()[0] for line in r.stdout.strip().splitlines() if line.strip()]
+    if not ids:
+        sys.exit(0)
+
+    state = {}
+    for sid in ids:
+        rv = subprocess.run(["pactl", "get-sink-input-volume", sid],
+                            capture_output=True, text=True)
+        if rv.returncode == 0:
+            m = re.search(r':\s+(\d+)\s+/', rv.stdout)
+            state[sid] = int(m.group(1)) if m else 65536
+
+    pathlib.Path("/tmp/crowia").mkdir(parents=True, exist_ok=True)
+    STATE_FILE.write_text(json.dumps(state))
+
+    for sid in state:
+        subprocess.run(["pactl", "set-sink-input-volume", sid, DUCK_LEVEL],
+                       capture_output=True)
+
+
+if __name__ == "__main__":
+    main()
