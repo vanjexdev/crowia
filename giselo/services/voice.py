@@ -85,11 +85,20 @@ class _VADThread(threading.Thread):
         try:
             # blocksize=0 lets the device choose its natural frame size;
             # we buffer internally to always feed webrtcvad exact 20ms chunks
-            with sd.InputStream(samplerate=self._rate, channels=1, device=self._device,
-                                dtype="int16", blocksize=0, callback=_cb):
-                self._stop_ev.wait()
-        except Exception as e:
-            log.warning("VAD stream error: %s", e)
+            devices = [self._device]
+            if self._device is not None:
+                devices.append(None)  # fallback to system default
+            for dev in devices:
+                try:
+                    with sd.InputStream(samplerate=self._rate, channels=1, device=dev,
+                                        dtype="int16", blocksize=0, callback=_cb):
+                        self._stop_ev.wait()
+                    break
+                except Exception as e:
+                    if dev is devices[-1]:
+                        log.warning("VAD stream error: %s", e)
+                    else:
+                        log.debug("VAD: device %r failed (%s), trying system default", dev, e)
         finally:
             if self._pulse_source:
                 os.environ.pop("PULSE_SOURCE", None)
@@ -157,11 +166,20 @@ class _LevelThread(threading.Thread):
                 level = min(100, int(rms * 600))
                 self._on_level(level)
 
-            with sd.InputStream(samplerate=self._rate, channels=1, device=self._device,
-                                dtype="int16", blocksize=1024, callback=_cb):
-                self._stop.wait()
-        except Exception as e:
-            log.warning("Level monitor failed: %s", e)
+            devices = [self._device]
+            if self._device is not None:
+                devices.append(None)
+            for dev in devices:
+                try:
+                    with sd.InputStream(samplerate=self._rate, channels=1, device=dev,
+                                        dtype="int16", blocksize=1024, callback=_cb):
+                        self._stop.wait()
+                    break
+                except Exception as e:
+                    if dev is devices[-1]:
+                        log.warning("Level monitor failed: %s", e)
+                    else:
+                        log.debug("Level: device %r failed (%s), trying system default", dev, e)
         finally:
             if self._pulse_source:
                 os.environ.pop("PULSE_SOURCE", None)
