@@ -359,10 +359,19 @@ class MainWindow(QMainWindow):
         notif.push("Cámara desactivada", "warn")
 
     def _refresh_drawer_if_open(self, name: str) -> None:
-        if state.active_drawer == name and self._drawer.is_open():
-            self.toggle_drawer(name)
-            if name == "historial":
-                self._drawer.scroll_to_bottom()
+        if state.active_drawer != name or not self._drawer.is_open():
+            return
+        if name not in DRAWER_BUILDERS:
+            return
+        build_fn, _, _ = DRAWER_BUILDERS[name]
+        layout = self._drawer.content_layout()
+        while layout.count() > 1:
+            item = layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        build_fn(layout)
+        if name == "historial":
+            self._drawer.scroll_to_bottom()
 
     def _on_core_container_resize(self, event) -> None:
         QWidget.resizeEvent(self._giselo_core.parent(), event)
