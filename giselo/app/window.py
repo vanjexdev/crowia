@@ -1,5 +1,5 @@
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-                              QSizePolicy, QApplication)
+                              QSizePolicy, QApplication, QFrame)
 from PyQt6.QtCore import Qt, QSize
 from PyQt6.QtGui import QColor
 
@@ -62,6 +62,12 @@ class MainWindow(QMainWindow):
         # Tab dock
         self._tab_dock = TabDock(list(state.INSTANCES), state.active_instance)
         root_layout.addWidget(self._tab_dock)
+
+        # Separator line (replaces tab-dock border-bottom)
+        sep = QFrame()
+        sep.setObjectName("tab-separator")
+        sep.setFixedHeight(1)
+        root_layout.addWidget(sep)
 
         # Body row: [drawer?] [rail-left] [center] [rail-right]
         body = QWidget()
