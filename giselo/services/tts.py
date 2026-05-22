@@ -1,4 +1,7 @@
 import logging
+import pathlib
+import queue
+import sys
 from PyQt6.QtCore import QObject, QThread, pyqtSignal
 
 log = logging.getLogger(__name__)
@@ -22,6 +25,56 @@ class _SpeakWorker(QThread):
             self.error.emit(str(e))
 
 
+class _StreamingTTSWorker(QThread):
+    finished = pyqtSignal()
+    error    = pyqtSignal(str)
+
+    def __init__(self, handler, tts_cmd: list[str], parent=None):
+        super().__init__(parent)
+        self._handler  = handler
+        self._tts_cmd  = tts_cmd
+        self._queue: queue.SimpleQueue[str | None] = queue.SimpleQueue()
+        self._player   = None
+
+    def enqueue(self, sentence: str) -> None:
+        self._queue.put(sentence)
+
+    def finish(self) -> None:
+        self._queue.put(None)
+
+    def stop(self) -> None:
+        self._queue.put(None)
+        if self._player is not None:
+            self._player.stop()
+
+    def run(self) -> None:
+        from crowia.output import StreamingTTSPlayer
+        is_piper = bool(self._tts_cmd) and "piper" in pathlib.Path(self._tts_cmd[0]).name
+        try:
+            if is_piper and sys.platform == "linux":
+                self._player = StreamingTTSPlayer(self._tts_cmd)
+                while True:
+                    sentence = self._queue.get()
+                    if sentence is None:
+                        break
+                    self._player.write(sentence)
+                self._player.finish()
+            else:
+                # Non-Linux or non-piper: collect all sentences then speak at once
+                sentences: list[str] = []
+                while True:
+                    s = self._queue.get()
+                    if s is None:
+                        break
+                    sentences.append(s)
+                if sentences:
+                    self._handler._speak(" ".join(sentences))
+            self.finished.emit()
+        except Exception as e:
+            log.exception("Streaming TTS failed")
+            self.error.emit(str(e))
+
+
 class TTSService(QObject):
     started  = pyqtSignal()
     finished = pyqtSignal()
@@ -30,13 +83,15 @@ class TTSService(QObject):
     def __init__(self, cfg: dict, parent=None):
         super().__init__(parent)
         from crowia.output import OutputHandler
-        self._handler = OutputHandler(cfg)
-        self._worker: _SpeakWorker | None = None
+        self._handler  = OutputHandler(cfg)
+        self._tts_cmd: list[str] = cfg["output"]["tts_command"]
+        self._worker: _SpeakWorker | _StreamingTTSWorker | None = None
         self.enabled: bool = cfg["output"]["tts_enabled"]
 
     def speak(self, text: str) -> None:
+        """Blocking speak — full text at once (fallback / non-streaming path)."""
         try:
-            import yaml, pathlib
+            import yaml
             _p = pathlib.Path(__file__).parents[2] / "config.yaml"
             self.enabled = yaml.safe_load(_p.read_text(encoding="utf-8"))["output"]["tts_enabled"]
         except Exception:
@@ -51,10 +106,38 @@ class TTSService(QObject):
         self._worker.start()
         self.started.emit()
 
+    def begin_stream(self, first_sentence: str) -> None:
+        """Start streaming TTS. Call stream_sentence() for subsequent sentences, end_stream() when done."""
+        if not self.enabled or not first_sentence.strip():
+            return
+        self.stop()
+        self._worker = _StreamingTTSWorker(self._handler, self._tts_cmd, self)
+        self._worker.finished.connect(self.finished)
+        self._worker.error.connect(self.error)
+        self._worker.finished.connect(self._cleanup)
+        self._worker.enqueue(first_sentence)
+        self._worker.start()
+        self.started.emit()
+
+    def stream_sentence(self, sentence: str) -> None:
+        """Add a sentence to the active streaming session."""
+        if not self.enabled or not sentence.strip():
+            return
+        if isinstance(self._worker, _StreamingTTSWorker) and self._worker.isRunning():
+            self._worker.enqueue(sentence)
+
+    def end_stream(self) -> None:
+        """Signal end of stream — worker flushes remaining audio and finishes."""
+        if isinstance(self._worker, _StreamingTTSWorker) and self._worker.isRunning():
+            self._worker.finish()
+
     def stop(self) -> None:
         self._handler.stop_tts()
-        if self._worker and self._worker.isRunning():
-            self._worker.wait(500)
+        if self._worker:
+            if isinstance(self._worker, _StreamingTTSWorker):
+                self._worker.stop()
+            if self._worker.isRunning():
+                self._worker.wait(500)
 
     def _cleanup(self) -> None:
         self._worker = None

@@ -33,7 +33,7 @@ def build(layout: QVBoxLayout) -> None:
                 margin-bottom: 2px;
             }}
         """)
-        card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
 
         card_layout = QVBoxLayout(card)
         card_layout.setContentsMargins(8, 5, 8, 5)
@@ -52,4 +52,4 @@ def build(layout: QVBoxLayout) -> None:
         body_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         card_layout.addWidget(body_lbl)
 
-        layout.addWidget(card)
+        layout.insertWidget(layout.count() - 1, card)

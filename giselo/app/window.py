@@ -54,6 +54,8 @@ class MainWindow(QMainWindow):
         self._fullscreen = False
         self._drawers: dict[str, Drawer] = {}
         self._response_buf = ""
+        self._sentence_buf = ""
+        self._tts_streaming = False
         self._palette = PalettePopup(self)
         self._palette.accent_selected.connect(self._on_accent)
         self._build_ui()
@@ -250,6 +252,7 @@ class MainWindow(QMainWindow):
         self._camera_pip.start(cam_index=index)
         state.camera_active = True
         self._status_bar.set_camera(True)
+        self._rail_right.set_active("camara")
         self._reposition_pip()
         notif.push(f"Cámara [{index}] activada", "info")
 
@@ -352,10 +355,12 @@ class MainWindow(QMainWindow):
     def _on_voice_started(self) -> None:
         state.voice_active = True
         self._status_bar.set_voice(True)
+        self._rail_right.set_active("voz")
         self._giselo_core.set_pill_text("● GRABANDO · LVL 0%")
         notif.push("Grabación iniciada", "info")
 
     def _on_voice_stopped(self) -> None:
+        self._rail_right.set_active(None)
         self._giselo_core.set_pill_text("● PROCESANDO VOZ...")
 
     def _on_voice_transcribed(self, text: str) -> None:
@@ -367,6 +372,7 @@ class MainWindow(QMainWindow):
     def _on_voice_error(self, msg: str) -> None:
         state.voice_active = False
         self._status_bar.set_voice(False)
+        self._rail_right.set_active(None)
         self._giselo_core.set_state("error")
         self._giselo_core.set_pill_text("● ERROR VOZ")
         notif.push(f"Voz error: {msg}", "error")
@@ -394,6 +400,8 @@ class MainWindow(QMainWindow):
         from datetime import datetime
         ts = datetime.now().strftime("%H:%M")
         self._response_buf = ""
+        self._sentence_buf = ""
+        self._tts_streaming = False
         self._chat_preview.update_user(text, ts)
         self._giselo_core.set_state("thinking")
         self._giselo_core.set_pill_text("● PROCESANDO")
@@ -401,12 +409,29 @@ class MainWindow(QMainWindow):
         self._svc.ask(text)
 
     def _on_chunk(self, chunk: str) -> None:
-        self._response_buf += chunk
+        from crowia.output import _split_sentences
+        from datetime import datetime
+        # Support both accumulated (most backends) and delta chunk formats
+        if chunk.startswith(self._response_buf):
+            delta = chunk[len(self._response_buf):]
+            self._response_buf = chunk
+        else:
+            delta = chunk
+            self._response_buf += chunk
         self._giselo_core.set_state("speaking")
         self._giselo_core.set_pill_text("● RESPONDIENDO")
-        from datetime import datetime
         ts = datetime.now().strftime("%H:%M")
         self._chat_preview.update_giselo(self._response_buf, ts)
+        if not delta:
+            return
+        self._sentence_buf += delta
+        sentences, self._sentence_buf = _split_sentences(self._sentence_buf)
+        for sent in sentences:
+            if not self._tts_streaming:
+                self._tts.begin_stream(sent)
+                self._tts_streaming = True
+            else:
+                self._tts.stream_sentence(sent)
 
     def _on_response_done(self, full: str) -> None:
         from datetime import datetime
@@ -416,12 +441,21 @@ class MainWindow(QMainWindow):
         self._giselo_core.set_pill_text("● LISTO")
         notif.push("Respuesta recibida", "ok")
         self._refresh_drawer_if_open("historial")
-        self._tts.speak(full)
-        from PyQt6.QtCore import QTimer
-        QTimer.singleShot(1500, lambda: (
-            self._giselo_core.set_state("speaking" if self._tts._worker else "idle"),
-            self._giselo_core.set_pill_text("● HABLANDO" if self._tts._worker else "● ESCUCHANDO · LVL 0%"),
-        ))
+        # Flush remaining sentence buffer (text after last punctuation)
+        remaining = self._sentence_buf.strip()
+        self._sentence_buf = ""
+        if remaining:
+            if not self._tts_streaming:
+                self._tts.begin_stream(remaining)
+                self._tts_streaming = True
+            else:
+                self._tts.stream_sentence(remaining)
+        if self._tts_streaming:
+            self._tts.end_stream()
+        elif not remaining:
+            # No TTS started at all (TTS disabled or empty response)
+            pass
+        self._tts_streaming = False
 
     def _on_response_error(self, msg: str) -> None:
         self._giselo_core.set_state("error")
@@ -438,6 +472,7 @@ class MainWindow(QMainWindow):
     def _on_pip_closed(self) -> None:
         state.camera_active = False
         self._status_bar.set_camera(False)
+        self._rail_right.set_active(None)
         notif.push("Cámara desactivada", "warn")
         cw, ch = self._core_container.width(), self._core_container.height()
         self._giselo_core.setGeometry(0, 0, cw, ch)

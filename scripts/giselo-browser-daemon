@@ -23,13 +23,21 @@ os.environ.setdefault("MOZ_ENABLE_WAYLAND", "1")
 from playwright.async_api import async_playwright, Page, BrowserContext, Playwright
 
 _args = argparse.ArgumentParser()
-_args.add_argument("--browser", default="firefox", choices=["firefox", "chromium", "chrome"])
-BROWSER_TYPE = _args.parse_args().browser
+_args.add_argument("--browser",    default="firefox", choices=["firefox", "chromium", "chrome"])
+_args.add_argument("--socket",     default="/tmp/crowia/browser.sock")
+_args.add_argument("--pid",        default="/tmp/crowia/browser.pid")
+_args.add_argument("--log",        default="/tmp/crowia/browser.log")
+_args.add_argument("--type-file",  default="/tmp/crowia/browser_type.txt")
+_args.add_argument("--headless",   action="store_true", default=False)
+_parsed      = _args.parse_args()
+BROWSER_TYPE = _parsed.browser
+HEADLESS     = _parsed.headless
 
-SOCKET_PATH  = pathlib.Path("/tmp/crowia/browser.sock")
-PID_FILE     = pathlib.Path("/tmp/crowia/browser.pid")
+SOCKET_PATH  = pathlib.Path(_parsed.socket)
+PID_FILE     = pathlib.Path(_parsed.pid)
+TYPE_FILE    = pathlib.Path(getattr(_parsed, "type_file"))
 PROFILE_DIR  = pathlib.Path.home() / f".config/crowia/browser-profile/{BROWSER_TYPE}"
-LOG_FILE     = pathlib.Path("/tmp/crowia/browser.log")
+LOG_FILE     = pathlib.Path(_parsed.log)
 EXTRACT_MAX  = 10_000
 
 logging.basicConfig(
@@ -58,21 +66,37 @@ async def launch_context():
         log.info("Launching %s context...", BROWSER_TYPE)
         if BROWSER_TYPE == "firefox":
             context = await pw_instance.firefox.launch_persistent_context(
-                str(PROFILE_DIR), headless=False,
-            )
-        elif BROWSER_TYPE == "chrome":
-            context = await pw_instance.chromium.launch_persistent_context(
-                str(PROFILE_DIR), headless=False, channel="chrome",
+                str(PROFILE_DIR), headless=HEADLESS,
+                firefox_user_prefs={
+                    "dom.webdriver.enabled": False,
+                    "useAutomationExtension": False,
+                },
             )
         else:
-            import shutil
-            sys_chromium = shutil.which("chromium") or shutil.which("chromium-browser")
-            chromium_kwargs: dict = {"headless": False}
-            if sys_chromium:
-                chromium_kwargs["executable_path"] = sys_chromium
-            context = await pw_instance.chromium.launch_persistent_context(
-                str(PROFILE_DIR), **chromium_kwargs,
-            )
+            # Try connecting to a running Chromium/Brave/Chrome with --remote-debugging-port=9222
+            try:
+                browser = await pw_instance.chromium.connect_over_cdp("http://localhost:9222")
+                ctxs = browser.contexts
+                context = ctxs[0] if ctxs else await browser.new_context()
+                pages = []
+                current_idx = 0
+                log.info("Connected to running Chromium via CDP on :9222")
+                return
+            except Exception as e:
+                log.info("CDP :9222 unavailable (%s) — launching fresh", e)
+            if BROWSER_TYPE == "chrome":
+                context = await pw_instance.chromium.launch_persistent_context(
+                    str(PROFILE_DIR), headless=HEADLESS, channel="chrome",
+                )
+            else:
+                import shutil
+                sys_chromium = shutil.which("chromium") or shutil.which("chromium-browser")
+                chromium_kwargs: dict = {"headless": HEADLESS}
+                if sys_chromium:
+                    chromium_kwargs["executable_path"] = sys_chromium
+                context = await pw_instance.chromium.launch_persistent_context(
+                    str(PROFILE_DIR), **chromium_kwargs,
+                )
         pages = []
         current_idx = 0
         log.info("%s context ready. Profile: %s", BROWSER_TYPE, PROFILE_DIR)
@@ -302,7 +326,7 @@ async def main():
     PROFILE_DIR.mkdir(parents=True, exist_ok=True)
     SOCKET_PATH.unlink(missing_ok=True)
     PID_FILE.write_text(str(os.getpid()))
-    pathlib.Path("/tmp/crowia/browser_type.txt").write_text(BROWSER_TYPE)
+    TYPE_FILE.write_text(BROWSER_TYPE)
 
     await launch_context()
 
