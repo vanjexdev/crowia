@@ -250,6 +250,7 @@ class MainWindow(QMainWindow):
         self._camera_pip.start(cam_index=index)
         state.camera_active = True
         self._status_bar.set_camera(True)
+        self._rail_right.set_active("camara")
         self._reposition_pip()
         notif.push(f"Cámara [{index}] activada", "info")
 
@@ -352,10 +353,12 @@ class MainWindow(QMainWindow):
     def _on_voice_started(self) -> None:
         state.voice_active = True
         self._status_bar.set_voice(True)
+        self._rail_right.set_active("voz")
         self._giselo_core.set_pill_text("● GRABANDO · LVL 0%")
         notif.push("Grabación iniciada", "info")
 
     def _on_voice_stopped(self) -> None:
+        self._rail_right.set_active(None)
         self._giselo_core.set_pill_text("● PROCESANDO VOZ...")
 
     def _on_voice_transcribed(self, text: str) -> None:
@@ -367,6 +370,7 @@ class MainWindow(QMainWindow):
     def _on_voice_error(self, msg: str) -> None:
         state.voice_active = False
         self._status_bar.set_voice(False)
+        self._rail_right.set_active(None)
         self._giselo_core.set_state("error")
         self._giselo_core.set_pill_text("● ERROR VOZ")
         notif.push(f"Voz error: {msg}", "error")
@@ -438,6 +442,7 @@ class MainWindow(QMainWindow):
     def _on_pip_closed(self) -> None:
         state.camera_active = False
         self._status_bar.set_camera(False)
+        self._rail_right.set_active(None)
         notif.push("Cámara desactivada", "warn")
         cw, ch = self._core_container.width(), self._core_container.height()
         self._giselo_core.setGeometry(0, 0, cw, ch)

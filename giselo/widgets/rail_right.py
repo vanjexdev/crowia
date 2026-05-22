@@ -21,6 +21,7 @@ class RailRight(QWidget):
         layout.setSpacing(4)
         layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
+        self._buttons: dict[str, QPushButton] = {}
         for glyph, name in ITEMS:
             btn = QPushButton(glyph)
             btn.setProperty("railBtn", True)
@@ -28,8 +29,13 @@ class RailRight(QWidget):
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.clicked.connect(lambda _, n=name: self.action_triggered.emit(n))
             layout.addWidget(btn)
+            self._buttons[name] = btn
 
         layout.addSpacerItem(QSpacerItem(0, 0, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding))
 
     def set_active(self, name: str | None) -> None:
-        pass
+        for n, btn in self._buttons.items():
+            active = (n == name)
+            btn.setProperty("railActive", active)
+            btn.style().unpolish(btn)
+            btn.style().polish(btn)
