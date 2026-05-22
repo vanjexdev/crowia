@@ -113,8 +113,9 @@ def _list_input_devices() -> list[tuple[str, str]]:
     Uses pactl alsa.card to map hw:X device names to friendly descriptions.
     Webcam/Bluetooth only reachable via 'pipewire' device.
     """
-    # Build alsa_card_number → friendly description via pactl
+    # Parse pactl sources: build card_desc (alsa card→desc) + via_pipewire (non-ALSA sources)
     card_desc: dict[int, str] = {}
+    via_pipewire: list[tuple[str, str]] = []  # (display, pactl_source_name)
     try:
         import subprocess, re as _re
         r = subprocess.run(["pactl", "list", "sources"],
@@ -132,8 +133,13 @@ def _list_input_devices() -> list[tuple[str, str]]:
                     if m:
                         card = int(m.group(1))
                 elif s == "" and name:
-                    if card is not None and desc and not name.endswith(".monitor"):
-                        card_desc[card] = desc
+                    if not name.endswith(".monitor") and desc and "Monitor of" not in desc:
+                        if card is not None:
+                            card_desc[card] = desc
+                        else:
+                            # Bluetooth, USB-audio not exposed as ALSA card → via PipeWire
+                            kind = "bluetooth" if name.startswith("bluez_") else "usb"
+                            via_pipewire.append((f"{desc}  ({kind}, via PipeWire)", name))
                     name = desc = card = None
     except Exception:
         pass
@@ -150,9 +156,9 @@ def _list_input_devices() -> list[tuple[str, str]]:
                 continue
             seen.add(sd_name)
             if sd_name == "pipewire":
-                display = "PipeWire  –  webcam / bluetooth / predeterminado sistema"
+                display = "PipeWire  –  predeterminado del sistema"
             elif sd_name == "pulse":
-                display = "PulseAudio  –  predeterminado sistema"
+                display = "PulseAudio  –  predeterminado del sistema"
             else:
                 m = _re.search(r'\(hw:(\d+)', sd_name)
                 if m and int(m.group(1)) in card_desc:
@@ -162,6 +168,11 @@ def _list_input_devices() -> list[tuple[str, str]]:
             items.append((display, sd_name))
     except Exception:
         pass
+
+    # Append specific Bluetooth/USB devices (accessed via PULSE_SOURCE trick)
+    for display, pactl_name in via_pipewire:
+        items.append((display, pactl_name))
+
     return items
 
 

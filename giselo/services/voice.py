@@ -19,7 +19,7 @@ class _VADThread(threading.Thread):
         self._silence_ms     = silence_ms
         self._min_speech_ms  = min_speech_ms
         self._aggressiveness = aggressiveness
-        self._device         = _sd_device(device)
+        self._device, self._pulse_source = _sd_device(device)
         self._stop_ev        = threading.Event()
 
     def run(self) -> None:
@@ -64,6 +64,9 @@ class _VADThread(threading.Thread):
                         self._stop_ev.set()
                         self._on_silence()
 
+        import os
+        if self._pulse_source:
+            os.environ["PULSE_SOURCE"] = self._pulse_source
         try:
             with sd.InputStream(samplerate=self._rate, channels=1, device=self._device,
                                 dtype="int16", blocksize=frame_samples,
@@ -71,6 +74,9 @@ class _VADThread(threading.Thread):
                 self._stop_ev.wait()
         except Exception as e:
             log.warning("VAD stream error: %s", e)
+        finally:
+            if self._pulse_source:
+                os.environ.pop("PULSE_SOURCE", None)
 
     def stop(self) -> None:
         self._stop_ev.set()
@@ -102,11 +108,17 @@ class _TranscribeWorker(QThread):
             self.error.emit(str(e))
 
 
-def _sd_device(cfg_device: str | None):
-    """Map config device string to sounddevice device param (None = system default)."""
+def _sd_device(cfg_device: str | None) -> tuple:
+    """Return (sd_device, pulse_source_env) for the configured device.
+    sd_device = value for sd.InputStream(device=...), None = system default.
+    pulse_source_env = value to set in PULSE_SOURCE env var, or None.
+    Pactl source names (alsa_input.*, bluez_input.*) are routed via pulse+PULSE_SOURCE.
+    """
     if not cfg_device or cfg_device == "default":
-        return None
-    return cfg_device
+        return None, None
+    if cfg_device.startswith(("alsa_input.", "bluez_input.")):
+        return "pulse", cfg_device
+    return cfg_device, None
 
 
 class _LevelThread(threading.Thread):
@@ -114,12 +126,15 @@ class _LevelThread(threading.Thread):
         super().__init__(daemon=True)
         self._on_level = on_level
         self._rate = rate
-        self._device = _sd_device(device)
+        self._device, self._pulse_source = _sd_device(device)
         self._stop = threading.Event()
 
     def run(self) -> None:
+        import os
         try:
             import sounddevice as sd
+            if self._pulse_source:
+                os.environ["PULSE_SOURCE"] = self._pulse_source
 
             def _cb(indata, frames, time_info, status):
                 rms = float(np.sqrt(np.mean(indata.astype(np.float32) ** 2)))
@@ -131,6 +146,9 @@ class _LevelThread(threading.Thread):
                 self._stop.wait()
         except Exception as e:
             log.warning("Level monitor failed: %s", e)
+        finally:
+            if self._pulse_source:
+                os.environ.pop("PULSE_SOURCE", None)
 
     def stop(self) -> None:
         self._stop.set()
