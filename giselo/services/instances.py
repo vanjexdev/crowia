@@ -59,6 +59,7 @@ class InstanceService(QObject):
         self._thread: QThread | None  = None
         self._worker: _AskWorker | None = None
         self._busy = False
+        self._inject_backend_name(self._cfg.get("backend", "claude"))
 
     # ── Public ────────────────────────────────────────────────────────────────
 
@@ -71,7 +72,15 @@ class InstanceService(QObject):
         return self._assistant.current_backend_name
 
     def switch_backend(self, name: str) -> str:
-        return self._assistant.switch_backend(name)
+        result = self._assistant.switch_backend(name)
+        self._inject_backend_name(name)
+        return result
+
+    def _inject_backend_name(self, name: str) -> None:
+        base = self._assistant._base_prompt
+        self._assistant.system_prompt = (
+            f"{base}\n\nEstás corriendo sobre el backend '{name}'."
+        )
 
     def ask(self, text: str) -> None:
         if self._busy:

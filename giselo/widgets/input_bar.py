@@ -1,5 +1,6 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout,
-                              QPlainTextEdit, QPushButton, QLabel, QSizePolicy)
+                              QPlainTextEdit, QPushButton, QLabel, QSizePolicy,
+                              QFileDialog)
 from PyQt6.QtCore import pyqtSignal, Qt
 from PyQt6.QtGui import QKeyEvent
 from giselo.app.theme import MUTE
@@ -78,16 +79,45 @@ class InputBar(QWidget):
 class _InputField(QPlainTextEdit):
     submitted = pyqtSignal()
 
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.textChanged.connect(self._check_at_trigger)
+        self._at_pos: int = -1  # position of last @ that triggered picker
+
     def keyPressEvent(self, e: QKeyEvent) -> None:
         is_enter = e.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter)
         shift    = bool(e.modifiers() & Qt.KeyboardModifier.ShiftModifier)
-        ctrl     = bool(e.modifiers() & Qt.KeyboardModifier.ControlModifier)
 
         if is_enter and not shift:
-            # Enter → send (Ctrl+Enter also sends)
             self.submitted.emit()
-        elif is_enter and shift:
-            # Shift+Enter → new line
-            super().keyPressEvent(e)
         else:
             super().keyPressEvent(e)
+
+    def _check_at_trigger(self) -> None:
+        text = self.toPlainText()
+        cursor = self.textCursor()
+        pos = cursor.position()
+        if pos < 1 or text[pos - 1] != "@":
+            return
+        # Only trigger if @ is at start or preceded by whitespace
+        if pos >= 2 and text[pos - 2] not in (" ", "\t", "\n"):
+            return
+        # Avoid re-triggering for same position
+        if pos == self._at_pos:
+            return
+        self._at_pos = pos
+        self._open_picker(pos)
+
+    def _open_picker(self, at_pos: int) -> None:
+        path, _ = QFileDialog.getOpenFileName(self, "Adjuntar archivo")
+        if not path:
+            return
+        # Replace the @ with the selected path
+        cursor = self.textCursor()
+        doc = self.toPlainText()
+        new_text = doc[: at_pos - 1] + path + doc[at_pos:]
+        self.setPlainText(new_text)
+        # Move cursor to end of inserted path
+        cursor = self.textCursor()
+        cursor.setPosition(at_pos - 1 + len(path))
+        self.setTextCursor(cursor)

@@ -35,6 +35,12 @@ class TTSService(QObject):
         self.enabled: bool = cfg["output"]["tts_enabled"]
 
     def speak(self, text: str) -> None:
+        try:
+            import yaml, pathlib
+            _p = pathlib.Path(__file__).parents[2] / "config.yaml"
+            self.enabled = yaml.safe_load(_p.read_text(encoding="utf-8"))["output"]["tts_enabled"]
+        except Exception:
+            pass
         if not self.enabled or not text.strip():
             return
         self.stop()

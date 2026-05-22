@@ -16,8 +16,9 @@ from giselo.widgets.chat_preview import ChatPreview
 from giselo.widgets.input_bar    import InputBar
 from giselo.widgets.status_bar   import StatusBar
 from giselo.widgets.camera_pip   import CameraPip
+from giselo.widgets.palette_popup import PalettePopup
 
-from giselo.panels import memoria, historial, sistema, cola, notif, tokens
+from giselo.panels import memoria, historial, sistema, cola, notif, tokens, config_panel
 
 
 DRAWER_BUILDERS = {
@@ -26,7 +27,8 @@ DRAWER_BUILDERS = {
     "sistema":   (sistema.build,   "#e8c33a", "Sistema"),
     "cola":      (cola.build,      ORANGE,    "Cola"),
     "notif":     (notif.build,     MUTE,      "Notificaciones"),
-    "tokens":    (tokens.build,    LIME,      "Tokens"),
+    "tokens":    (tokens.build,       LIME,      "Tokens"),
+    "config":    (config_panel.build, MUTE,      "Configuración"),
 }
 
 
@@ -43,6 +45,8 @@ class MainWindow(QMainWindow):
         self._fullscreen = False
         self._drawers: dict[str, Drawer] = {}
         self._response_buf = ""
+        self._palette = PalettePopup(self)
+        self._palette.accent_selected.connect(self._on_accent)
         self._build_ui()
         self._connect_signals()
         self._apply_breakpoint(self.width())
@@ -241,7 +245,13 @@ class MainWindow(QMainWindow):
         notif.push(f"Cámara [{index}] activada", "info")
 
     def open_palette(self) -> None:
-        pass  # Phase E
+        center = self.geometry().center()
+        from PyQt6.QtCore import QPoint
+        self._palette.show_at(QPoint(center.x(), center.y()))
+
+    def _on_accent(self, color: str) -> None:
+        state.accent = color
+        self.setStyleSheet(build_qss(color))
 
     def close_drawer(self) -> None:
         if self._drawer.is_open():
@@ -250,9 +260,12 @@ class MainWindow(QMainWindow):
             state.active_drawer = None
 
     def switch_instance(self, name: str) -> None:
+        from giselo.services import memory as mem_svc
         state.active_instance = name
+        mem_svc.set_active(name)
         self._tab_dock.set_active(name)
         self._status_bar.set_instance(name)
+        self._svc.switch_backend(name)
         notif.push(f"Instancia: {name}", "info")
 
     def toggle_drawer(self, name: str) -> None:
@@ -367,7 +380,13 @@ class MainWindow(QMainWindow):
         self._giselo_core.set_state("error")
         self._giselo_core.set_pill_text("● ERROR")
         self._chat_preview.update_giselo(f"Error: {msg}", "--:--")
+        self._input_bar.setEnabled(True)
         notif.push(f"Error: {msg}", "error")
+        from PyQt6.QtCore import QTimer
+        QTimer.singleShot(2000, lambda: (
+            self._giselo_core.set_state("idle"),
+            self._giselo_core.set_pill_text("● ESCUCHANDO · LVL 0%"),
+        ))
 
     def _on_pip_closed(self) -> None:
         state.camera_active = False
