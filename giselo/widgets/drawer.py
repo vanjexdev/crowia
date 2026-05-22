@@ -92,5 +92,11 @@ class Drawer(QWidget):
         except RuntimeError:
             pass
 
+    def scroll_to_bottom(self) -> None:
+        from PyQt6.QtCore import QTimer
+        QTimer.singleShot(0, lambda: self._scroll.verticalScrollBar().setValue(
+            self._scroll.verticalScrollBar().maximum()
+        ))
+
     def is_open(self) -> bool:
         return self._open

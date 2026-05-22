@@ -8,6 +8,7 @@ ITEMS = [
     ("◑", "sistema"),
     ("⊞", "cola"),
     ("◔", "notif"),
+    ("⬡", "tokens"),
 ]
 
 

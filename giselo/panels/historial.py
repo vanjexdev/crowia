@@ -10,7 +10,7 @@ def build(layout: QVBoxLayout) -> None:
     if not messages:
         lbl = QLabel("Sin historial aún")
         lbl.setStyleSheet(f"color: {MUTE}; font-size: 11px;")
-        layout.insertWidget(layout.count() - 1, lbl)
+        layout.addWidget(lbl)
         return
 
     for msg in messages:
@@ -52,4 +52,4 @@ def build(layout: QVBoxLayout) -> None:
         body_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         card_layout.addWidget(body_lbl)
 
-        layout.insertWidget(layout.count() - 1, card)
+        layout.addWidget(card)

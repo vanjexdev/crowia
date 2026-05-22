@@ -17,15 +17,16 @@ from giselo.widgets.input_bar    import InputBar
 from giselo.widgets.status_bar   import StatusBar
 from giselo.widgets.camera_pip   import CameraPip
 
-from giselo.panels import memoria, historial, sistema, cola, notif
+from giselo.panels import memoria, historial, sistema, cola, notif, tokens
 
 
 DRAWER_BUILDERS = {
-    "memoria":   (memoria.build,   LIME,   "Memoria"),
-    "historial": (historial.build, CYAN,   "Historial"),
+    "memoria":   (memoria.build,   LIME,      "Memoria"),
+    "historial": (historial.build, CYAN,      "Historial"),
     "sistema":   (sistema.build,   "#e8c33a", "Sistema"),
-    "cola":      (cola.build,      ORANGE, "Cola"),
-    "notif":     (notif.build,     MUTE,   "Notificaciones"),
+    "cola":      (cola.build,      ORANGE,    "Cola"),
+    "notif":     (notif.build,     MUTE,      "Notificaciones"),
+    "tokens":    (tokens.build,    LIME,      "Tokens"),
 }
 
 
@@ -258,6 +259,8 @@ class MainWindow(QMainWindow):
 
         self._rail_left.set_active(name)
         self._drawer.open_drawer()
+        if name == "historial":
+            self._drawer.scroll_to_bottom()
 
     # ── Internal slots ────────────────────────────────────────────────────────
 
@@ -317,6 +320,8 @@ class MainWindow(QMainWindow):
     def _refresh_drawer_if_open(self, name: str) -> None:
         if state.active_drawer == name and self._drawer.is_open():
             self.toggle_drawer(name)
+            if name == "historial":
+                self._drawer.scroll_to_bottom()
 
     def _on_core_container_resize(self, event) -> None:
         QWidget.resizeEvent(self._giselo_core.parent(), event)
