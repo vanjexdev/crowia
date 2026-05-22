@@ -17,7 +17,7 @@ from giselo.widgets.input_bar    import InputBar
 from giselo.widgets.status_bar   import StatusBar
 from giselo.widgets.camera_pip   import CameraPip
 
-from giselo.panels import memoria, historial, sistema, cola, notif, tokens
+from giselo.panels import memoria, historial, sistema, cola, notif, tokens, config_panel
 
 
 DRAWER_BUILDERS = {
@@ -26,7 +26,8 @@ DRAWER_BUILDERS = {
     "sistema":   (sistema.build,   "#e8c33a", "Sistema"),
     "cola":      (cola.build,      ORANGE,    "Cola"),
     "notif":     (notif.build,     MUTE,      "Notificaciones"),
-    "tokens":    (tokens.build,    LIME,      "Tokens"),
+    "tokens":    (tokens.build,       LIME,      "Tokens"),
+    "config":    (config_panel.build, MUTE,      "Configuración"),
 }
 
 

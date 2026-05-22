@@ -41,6 +41,8 @@ class RailLeft(QWidget):
         config_btn.setProperty("railBtn", True)
         config_btn.setToolTip("Configuración")
         config_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        config_btn.clicked.connect(lambda: self.drawer_toggled.emit("config"))
+        self._buttons["config"] = config_btn
         layout.addWidget(config_btn)
 
     def set_active(self, name: str | None) -> None:
