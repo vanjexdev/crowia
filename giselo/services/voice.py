@@ -32,7 +32,8 @@ class _VADThread(threading.Thread):
 
         vad = webrtcvad.Vad(self._aggressiveness)
         frame_ms      = 20
-        frame_samples = self._rate * frame_ms // 1000  # 320 @ 16kHz
+        frame_samples = self._rate * frame_ms // 1000      # 320 @ 16kHz
+        frame_bytes   = frame_samples * 2                  # int16 = 2 bytes/sample
 
         min_speech_frames = self._min_speech_ms // frame_ms
         max_silence_frames = self._silence_ms // frame_ms
@@ -41,36 +42,51 @@ class _VADThread(threading.Thread):
         silence_frames = 0
         had_speech     = False
         triggered      = False
+        buf            = b""  # accumulate until we have a full 20ms chunk
+        consec_speech  = 0    # consecutive speech frames after had_speech (noise filter)
 
         def _cb(indata, frames, _time, _status):
-            nonlocal speech_frames, silence_frames, had_speech, triggered
+            nonlocal speech_frames, silence_frames, had_speech, triggered, buf, consec_speech
             if triggered or self._stop_ev.is_set():
                 return
-            raw = indata.tobytes()
-            try:
-                is_speech = vad.is_speech(raw, self._rate)
-            except Exception:
-                return
-            if is_speech:
-                speech_frames += 1
-                silence_frames = 0
-                if speech_frames >= min_speech_frames:
-                    had_speech = True
-            else:
-                if had_speech:
-                    silence_frames += 1
-                    if silence_frames >= max_silence_frames:
-                        triggered = True
-                        self._stop_ev.set()
-                        self._on_silence()
+            # Flatten to mono int16 bytes regardless of device block size
+            mono = indata[:, 0] if indata.ndim > 1 else indata.ravel()
+            buf += mono.astype(np.int16).tobytes()
+            # Process as many complete 20ms frames as available
+            while len(buf) >= frame_bytes and not triggered:
+                chunk, buf = buf[:frame_bytes], buf[frame_bytes:]
+                try:
+                    is_speech = vad.is_speech(chunk, self._rate)
+                except Exception as e:
+                    log.debug("VAD frame skip: %s", e)
+                    continue
+                if is_speech:
+                    speech_frames += 1
+                    if speech_frames >= min_speech_frames:
+                        had_speech = True
+                    if had_speech:
+                        consec_speech += 1
+                        # Only reset silence counter if sustained re-speech (>80ms),
+                        # not a noise blip (1-3 frames = 20-60ms)
+                        if consec_speech > 4:
+                            silence_frames = 0
+                else:
+                    consec_speech = 0
+                    if had_speech:
+                        silence_frames += 1
+                        if silence_frames >= max_silence_frames:
+                            triggered = True
+                            self._stop_ev.set()
+                            self._on_silence()
 
         import os
         if self._pulse_source:
             os.environ["PULSE_SOURCE"] = self._pulse_source
         try:
+            # blocksize=0 lets the device choose its natural frame size;
+            # we buffer internally to always feed webrtcvad exact 20ms chunks
             with sd.InputStream(samplerate=self._rate, channels=1, device=self._device,
-                                dtype="int16", blocksize=frame_samples,
-                                callback=_cb):
+                                dtype="int16", blocksize=0, callback=_cb):
                 self._stop_ev.wait()
         except Exception as e:
             log.warning("VAD stream error: %s", e)
