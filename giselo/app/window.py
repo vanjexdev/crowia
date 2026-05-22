@@ -218,6 +218,7 @@ class MainWindow(QMainWindow):
         state.camera_active = True
         self._status_bar.set_camera(True)
         self._reposition_pip()
+        notif.push(f"Cámara [{index}] activada", "info")
 
     def open_palette(self) -> None:
         pass  # Phase E
@@ -232,6 +233,7 @@ class MainWindow(QMainWindow):
         state.active_instance = name
         self._tab_dock.set_active(name)
         self._status_bar.set_instance(name)
+        notif.push(f"Instancia: {name}", "info")
 
     def toggle_drawer(self, name: str) -> None:
         if state.active_drawer == name and self._drawer.is_open():
@@ -293,6 +295,8 @@ class MainWindow(QMainWindow):
         self._chat_preview.update_giselo(full, ts)
         self._giselo_core.set_state("success")
         self._giselo_core.set_pill_text("● LISTO")
+        notif.push("Respuesta recibida", "ok")
+        self._refresh_drawer_if_open("historial")
         from PyQt6.QtCore import QTimer
         QTimer.singleShot(1500, lambda: (
             self._giselo_core.set_state("idle"),
@@ -303,10 +307,16 @@ class MainWindow(QMainWindow):
         self._giselo_core.set_state("error")
         self._giselo_core.set_pill_text("● ERROR")
         self._chat_preview.update_giselo(f"Error: {msg}", "--:--")
+        notif.push(f"Error: {msg}", "error")
 
     def _on_pip_closed(self) -> None:
         state.camera_active = False
         self._status_bar.set_camera(False)
+        notif.push("Cámara desactivada", "warn")
+
+    def _refresh_drawer_if_open(self, name: str) -> None:
+        if state.active_drawer == name and self._drawer.is_open():
+            self.toggle_drawer(name)
 
     def _on_core_container_resize(self, event) -> None:
         QWidget.resizeEvent(self._giselo_core.parent(), event)
