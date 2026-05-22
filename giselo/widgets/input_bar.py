@@ -79,8 +79,15 @@ class _InputField(QPlainTextEdit):
     submitted = pyqtSignal()
 
     def keyPressEvent(self, e: QKeyEvent) -> None:
-        if e.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter) and \
-           e.modifiers() & Qt.KeyboardModifier.ControlModifier:
+        is_enter = e.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter)
+        shift    = bool(e.modifiers() & Qt.KeyboardModifier.ShiftModifier)
+        ctrl     = bool(e.modifiers() & Qt.KeyboardModifier.ControlModifier)
+
+        if is_enter and not shift:
+            # Enter → send (Ctrl+Enter also sends)
             self.submitted.emit()
+        elif is_enter and shift:
+            # Shift+Enter → new line
+            super().keyPressEvent(e)
         else:
             super().keyPressEvent(e)

@@ -15,6 +15,7 @@ from giselo.widgets.giselo_core  import GiseloCore
 from giselo.widgets.chat_preview import ChatPreview
 from giselo.widgets.input_bar    import InputBar
 from giselo.widgets.status_bar   import StatusBar
+from giselo.widgets.camera_pip   import CameraPip
 
 from giselo.panels import memoria, historial, sistema, cola, notif
 
@@ -99,8 +100,17 @@ class MainWindow(QMainWindow):
         center_layout.setContentsMargins(0, 0, 0, 0)
         center_layout.setSpacing(0)
 
-        self._giselo_core = GiseloCore()
-        center_layout.addWidget(self._giselo_core, stretch=1)
+        # GiseloCore wrapped in a container so CameraPip can float over it
+        core_container = QWidget()
+        core_container.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self._giselo_core = GiseloCore(core_container)
+        self._giselo_core.setGeometry(0, 0, 600, 400)
+
+        self._camera_pip = CameraPip(core_container)
+        self._camera_pip.closed.connect(self._on_pip_closed)
+
+        core_container.resizeEvent = self._on_core_container_resize
+        center_layout.addWidget(core_container, stretch=1)
 
         self._chat_preview = ChatPreview()
         center_layout.addWidget(self._chat_preview)
@@ -153,6 +163,10 @@ class MainWindow(QMainWindow):
         if not is_medium and self._drawer.is_open():
             self._drawer.close_drawer()
 
+        # Adjust PIP size on breakpoint change
+        if hasattr(self, "_camera_pip"):
+            self._camera_pip.set_compact(is_min)
+
     # ── Shortcut slots ────────────────────────────────────────────────────────
 
     def toggle_fullscreen(self) -> None:
@@ -170,8 +184,40 @@ class MainWindow(QMainWindow):
         self._status_bar.set_voice(state.voice_active)
 
     def toggle_camera(self) -> None:
-        state.camera_active = not state.camera_active
-        self._status_bar.set_camera(state.camera_active)
+        if self._camera_pip.active:
+            self._camera_pip.stop()
+            return
+
+        from PyQt6.QtMultimedia import QMediaDevices
+        cameras = QMediaDevices.videoInputs()
+        if not cameras:
+            return
+
+        if len(cameras) == 1:
+            self._start_camera(0)
+        else:
+            from PyQt6.QtWidgets import QMenu
+            from PyQt6.QtGui import QCursor
+            menu = QMenu(self)
+            menu.setStyleSheet(f"""
+                QMenu {{ background: #0f1a2e; color: #cfd6e6; border: 1px solid #cfd6e6;
+                         font-family: 'JetBrains Mono', monospace; font-size: 11px; }}
+                QMenu::item {{ padding: 5px 16px; }}
+                QMenu::item:selected {{ background: rgba(136,201,58,0.15); color: #88c93a; }}
+            """)
+            for i, cam in enumerate(cameras):
+                action = menu.addAction(f"[{i}] {cam.description()}")
+                action.setData(i)
+            chosen = menu.exec(QCursor.pos())
+            if chosen:
+                self._start_camera(chosen.data())
+
+    def _start_camera(self, index: int) -> None:
+        compact = state.breakpoint == "MIN"
+        self._camera_pip.start(compact, cam_index=index)
+        state.camera_active = True
+        self._status_bar.set_camera(True)
+        self._reposition_pip()
 
     def open_palette(self) -> None:
         pass  # Phase E
@@ -257,6 +303,25 @@ class MainWindow(QMainWindow):
         self._giselo_core.set_state("error")
         self._giselo_core.set_pill_text("● ERROR")
         self._chat_preview.update_giselo(f"Error: {msg}", "--:--")
+
+    def _on_pip_closed(self) -> None:
+        state.camera_active = False
+        self._status_bar.set_camera(False)
+
+    def _on_core_container_resize(self, event) -> None:
+        QWidget.resizeEvent(self._giselo_core.parent(), event)
+        self._giselo_core.setGeometry(0, 0, event.size().width(), event.size().height())
+        self._reposition_pip()
+
+    def _reposition_pip(self) -> None:
+        if not self._camera_pip.active:
+            return
+        cw = self._giselo_core.width()
+        pip_w = self._camera_pip.width()
+        pip_h = self._camera_pip.height()
+        x = (cw - pip_w) // 2
+        self._camera_pip.move(x, 12)
+        self._camera_pip.raise_()
 
     def _on_busy_changed(self, busy: bool) -> None:
         self._input_bar.setEnabled(not busy)
