@@ -54,8 +54,16 @@ class MainWindow(QMainWindow):
         self._svc.busy_changed.connect(self._on_busy_changed)
 
         from crowia.config import load as load_cfg
+        _cfg = load_cfg()
+
+        from giselo.services.tts import TTSService
+        self._tts = TTSService(_cfg, self)
+        self._tts.started.connect(lambda: self._giselo_core.set_state("speaking"))
+        self._tts.finished.connect(self._on_tts_done)
+        self._tts.error.connect(lambda e: notif.push(f"TTS: {e}", "warn"))
+
         from giselo.services.voice import VoiceService
-        self._voice = VoiceService(load_cfg(), self)
+        self._voice = VoiceService(_cfg, self)
         self._voice.started.connect(self._on_voice_started)
         self._voice.stopped_recording.connect(self._on_voice_stopped)
         self._voice.transcribed.connect(self._on_voice_transcribed)
@@ -273,6 +281,12 @@ class MainWindow(QMainWindow):
         if name == "historial":
             self._drawer.scroll_to_bottom()
 
+    # ── TTS slots ─────────────────────────────────────────────────────────────
+
+    def _on_tts_done(self) -> None:
+        self._giselo_core.set_state("idle")
+        self._giselo_core.set_pill_text("● ESCUCHANDO · LVL 0%")
+
     # ── Voice slots ───────────────────────────────────────────────────────────
 
     def _on_voice_started(self) -> None:
@@ -316,6 +330,7 @@ class MainWindow(QMainWindow):
             self.toggle_camera()
 
     def _on_message(self, text: str) -> None:
+        self._tts.stop()
         from datetime import datetime
         ts = datetime.now().strftime("%H:%M")
         self._response_buf = ""
@@ -341,10 +356,11 @@ class MainWindow(QMainWindow):
         self._giselo_core.set_pill_text("● LISTO")
         notif.push("Respuesta recibida", "ok")
         self._refresh_drawer_if_open("historial")
+        self._tts.speak(full)
         from PyQt6.QtCore import QTimer
         QTimer.singleShot(1500, lambda: (
-            self._giselo_core.set_state("idle"),
-            self._giselo_core.set_pill_text("● ESCUCHANDO · LVL 0%"),
+            self._giselo_core.set_state("speaking" if self._tts._worker else "idle"),
+            self._giselo_core.set_pill_text("● HABLANDO" if self._tts._worker else "● ESCUCHANDO · LVL 0%"),
         ))
 
     def _on_response_error(self, msg: str) -> None:
