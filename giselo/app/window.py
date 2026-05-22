@@ -132,18 +132,18 @@ class MainWindow(QMainWindow):
         center_layout.setSpacing(0)
 
         # GiseloCore wrapped in a container so CameraPip can float over it
-        core_container = QWidget()
-        core_container.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        self._giselo_core = GiseloCore(core_container)
+        self._core_container = QWidget()
+        self._core_container.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self._giselo_core = GiseloCore(self._core_container)
         self._giselo_core.setGeometry(0, 0, 600, 400)
         from PyQt6.QtGui import QColor as _QColor
         self._giselo_core.set_accent(_QColor(state.accent))
 
-        self._camera_pip = CameraPip(core_container)
+        self._camera_pip = CameraPip(self._core_container)
         self._camera_pip.closed.connect(self._on_pip_closed)
 
-        core_container.resizeEvent = self._on_core_container_resize
-        center_layout.addWidget(core_container, stretch=1)
+        self._core_container.resizeEvent = self._on_core_container_resize
+        center_layout.addWidget(self._core_container, stretch=1)
 
         self._chat_preview = ChatPreview()
         center_layout.addWidget(self._chat_preview)
@@ -442,9 +442,10 @@ class MainWindow(QMainWindow):
         state.camera_active = False
         self._status_bar.set_camera(False)
         notif.push("Cámara desactivada", "warn")
-        container = self._giselo_core.parent()
-        cw, ch = container.width(), container.height()
+        cw, ch = self._core_container.width(), self._core_container.height()
+        self._giselo_core.setParent(self._core_container)
         self._giselo_core.setGeometry(0, 0, cw, ch)
+        self._giselo_core.show()
 
     def _refresh_drawer_if_open(self, name: str) -> None:
         if state.active_drawer != name or not self._drawer.is_open():
@@ -462,31 +463,31 @@ class MainWindow(QMainWindow):
             self._drawer.scroll_to_bottom()
 
     def _on_core_container_resize(self, event) -> None:
-        QWidget.resizeEvent(self._giselo_core.parent(), event)
+        QWidget.resizeEvent(self._core_container, event)
         cw, ch = event.size().width(), event.size().height()
-        self._giselo_core.setGeometry(0, 0, cw, ch)
+        if not self._camera_pip.active:
+            self._giselo_core.setGeometry(0, 0, cw, ch)
         self._reposition_pip()
 
     def _reposition_pip(self) -> None:
         if not self._camera_pip.active:
             return
-        container = self._giselo_core.parent()
-        cw = container.width()
-        ch = container.height()
+        cw = self._core_container.width()
+        ch = self._core_container.height()
         # Camera fills full container
         self._camera_pip.expand(cw, ch, state.accent)
         self._camera_pip.setGeometry(0, 0, cw, ch)
-        # GiseloCore sits on top as small overlay — bottom-right
+        # Re-parent GiseloCore into CameraPip so it renders above the native
+        # QVideoWidget child (Qt raise_() cannot beat a native window Z-order)
         overlay_size = max(160, min(cw, ch) // 3)
+        self._giselo_core.setParent(self._camera_pip)
         self._giselo_core.setGeometry(
             cw - overlay_size - 12,
             ch - overlay_size - 12,
             overlay_size,
             overlay_size,
         )
-        self._giselo_core.raise_()
-        self._camera_pip.raise_()
-        # Re-raise giselo above camera
+        self._giselo_core.show()
         self._giselo_core.raise_()
 
     def _on_busy_changed(self, busy: bool) -> None:
