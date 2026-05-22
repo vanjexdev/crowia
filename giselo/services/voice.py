@@ -7,6 +7,74 @@ from PyQt6.QtCore import QObject, QThread, pyqtSignal
 log = logging.getLogger(__name__)
 
 
+class _VADThread(threading.Thread):
+    """Monitors mic via webrtcvad; calls on_silence() after sustained silence following speech."""
+
+    def __init__(self, on_silence, rate: int = 16000,
+                 silence_ms: int = 1000, min_speech_ms: int = 400,
+                 aggressiveness: int = 2):
+        super().__init__(daemon=True)
+        self._on_silence    = on_silence
+        self._rate          = rate
+        self._silence_ms    = silence_ms
+        self._min_speech_ms = min_speech_ms
+        self._aggressiveness = aggressiveness
+        self._stop_ev       = threading.Event()
+
+    def run(self) -> None:
+        try:
+            import webrtcvad
+            import sounddevice as sd
+        except ImportError as e:
+            log.warning("VAD unavailable: %s", e)
+            return
+
+        vad = webrtcvad.Vad(self._aggressiveness)
+        frame_ms      = 20
+        frame_samples = self._rate * frame_ms // 1000  # 320 @ 16kHz
+
+        min_speech_frames = self._min_speech_ms // frame_ms
+        max_silence_frames = self._silence_ms // frame_ms
+
+        speech_frames  = 0
+        silence_frames = 0
+        had_speech     = False
+        triggered      = False
+
+        def _cb(indata, frames, _time, _status):
+            nonlocal speech_frames, silence_frames, had_speech, triggered
+            if triggered or self._stop_ev.is_set():
+                return
+            raw = indata.tobytes()
+            try:
+                is_speech = vad.is_speech(raw, self._rate)
+            except Exception:
+                return
+            if is_speech:
+                speech_frames += 1
+                silence_frames = 0
+                if speech_frames >= min_speech_frames:
+                    had_speech = True
+            else:
+                if had_speech:
+                    silence_frames += 1
+                    if silence_frames >= max_silence_frames:
+                        triggered = True
+                        self._stop_ev.set()
+                        self._on_silence()
+
+        try:
+            with sd.InputStream(samplerate=self._rate, channels=1,
+                                dtype="int16", blocksize=frame_samples,
+                                callback=_cb):
+                self._stop_ev.wait()
+        except Exception as e:
+            log.warning("VAD stream error: %s", e)
+
+    def stop(self) -> None:
+        self._stop_ev.set()
+
+
 class _TranscribeWorker(QThread):
     done              = pyqtSignal(str)
     error             = pyqtSignal(str)
@@ -65,6 +133,7 @@ class VoiceService(QObject):
     transcribed        = pyqtSignal(str)
     error              = pyqtSignal(str)
     level_changed      = pyqtSignal(int)
+    _vad_silence       = pyqtSignal()  # cross-thread safe trigger for auto-stop
 
     def __init__(self, cfg: dict, parent=None):
         super().__init__(parent)
@@ -72,8 +141,10 @@ class VoiceService(QObject):
         self._recording = False
         self._wav_path: pathlib.Path | None = None
         self._level_thread: _LevelThread | None = None
+        self._vad_thread: _VADThread | None = None
         self._worker: _TranscribeWorker | None = None
         self._transcriber = None
+        self._vad_silence.connect(self.stop_recording)
 
         from crowia.recorder import Recorder
         self._recorder = Recorder(cfg)
@@ -92,20 +163,33 @@ class VoiceService(QObject):
     def recording(self) -> bool:
         return self._recording
 
-    def start_recording(self) -> None:
+    def start_recording(self, auto_stop: bool = False) -> None:
         if self._recording:
             return
         self._recording = True
         self._wav_path = self._recorder.start()
         self._level_thread = _LevelThread(self._emit_level)
         self._level_thread.start()
+        if auto_stop:
+            ao = self._cfg.get("always_on", {})
+            self._vad_thread = _VADThread(
+                on_silence=self._vad_silence.emit,
+                rate=self._cfg.get("audio", {}).get("rate", 16000),
+                silence_ms=ao.get("silence_duration_ms", 1000),
+                min_speech_ms=ao.get("min_speech_ms", 400),
+                aggressiveness=ao.get("vad_aggressiveness", 2),
+            )
+            self._vad_thread.start()
         self.started.emit()
-        log.info("VoiceService: recording started")
+        log.info("VoiceService: recording started (auto_stop=%s)", auto_stop)
 
     def stop_recording(self) -> None:
         if not self._recording:
             return
         self._recording = False
+        if self._vad_thread:
+            self._vad_thread.stop()
+            self._vad_thread = None
         wav = self._recorder.stop()
         if self._level_thread:
             self._level_thread.stop()

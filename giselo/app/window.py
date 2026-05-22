@@ -228,7 +228,7 @@ class MainWindow(QMainWindow):
         self._input_bar.set_always_on(self._always_on)
         if self._always_on:
             if not self._voice.recording and not self._tts_active:
-                self._voice.start_recording()
+                self._voice.start_recording(auto_stop=True)
         else:
             if self._voice.recording:
                 self._voice.stop_recording()
@@ -238,7 +238,7 @@ class MainWindow(QMainWindow):
             return
         if self._voice.recording or self._tts_active or not self._input_bar.isEnabled():
             return
-        self._voice.start_recording()
+        self._voice.start_recording(auto_stop=True)
 
     def toggle_camera(self) -> None:
         if self._camera_pip.active:
