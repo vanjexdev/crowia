@@ -57,11 +57,13 @@ claude:
     para selector de carpetas o ''giselo-pick'' para selector de archivos — abre un
     explorador gráfico y devuelve el path elegido. Para tareas de múltiples pasos
     ejecuta los comandos uno tras otro en secuencia. NUNCA digas que no tienes acceso
-    al navegador.'
+    al navegador. PERFILES DE TRABAJO: Si el usuario dice "vamos a trabajar para
+    [nombre]" o "activa el perfil [nombre]", ejecuta ''giselo-activate-profile
+    [nombre]'' — esto lanza el navegador del perfil y activa su contexto.'
   allowed_tools:
     WebSearch Bash(git *) Bash(zeditor*) Bash(alacritty*) Bash(giselo-ask*)
     Bash(giselo-askpass*) Bash(giselo-pick*) Bash(giselo-browser*) Bash(giselo-playwright*)
-    Bash(giselo-google*) Bash(giselo-remind*) Read Edit Write
+    Bash(giselo-google*) Bash(giselo-remind*) Bash(giselo-activate-profile*) Read Edit Write
   timeout_seconds: 300
 browser:
   type: chromium
@@ -104,6 +106,10 @@ server:
     password_hash: $2b$12$X3YBmgUL6K5E1ZClwnq7O.zVyPfwH1jl2qPt3bFSV2k1RA92Os6E6
     token_secret: 88543faa5f1086ddab3c9992b756779dad91558d8915c5ab9407b07aac27e949
     token_expire_hours: 72
+profiles:
+  pdm:
+    browser: floorp
+    context: "Modo de trabajo PDM activado. El navegador preferido para este proyecto es Floorp. Cuando el usuario pida abrir el navegador, usa Floorp."
 skills:
   path: skills/
   enabled:

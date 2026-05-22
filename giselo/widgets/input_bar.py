@@ -120,10 +120,16 @@ class _InputField(QPlainTextEdit):
             QMenu::item:selected { background: rgba(136,201,58,0.15); color: #88c93a; }
         """)
         act_file   = menu.addAction("📄  Adjuntar archivo")
+        act_folder = menu.addAction("📁  Adjuntar carpeta")
         act_screen = menu.addAction("📷  Capturar pantalla")
         chosen = menu.exec(QCursor.pos())
+        self._at_pos = -1
         if chosen == act_file:
             path, _ = QFileDialog.getOpenFileName(self, "Adjuntar archivo")
+            if path:
+                self._insert_path(at_pos, path)
+        elif chosen == act_folder:
+            path = QFileDialog.getExistingDirectory(self, "Adjuntar carpeta")
             if path:
                 self._insert_path(at_pos, path)
         elif chosen == act_screen:
