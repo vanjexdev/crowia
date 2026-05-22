@@ -35,7 +35,6 @@ class GiseloCore(QWidget):
         self.setObjectName("center-widget")
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setMinimumSize(300, 300)
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground)
 
         self._state       = "idle"
@@ -131,6 +130,8 @@ class GiseloCore(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+
+        painter.fillRect(self.rect(), QColor(BG))
 
         W, H = self.width(), self.height()
         cx, cy = W / 2.0, H / 2.0

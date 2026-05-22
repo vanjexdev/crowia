@@ -197,9 +197,7 @@ class MainWindow(QMainWindow):
         if not is_medium and self._drawer.is_open():
             self._drawer.close_drawer()
 
-        # Adjust PIP size on breakpoint change
-        if hasattr(self, "_camera_pip"):
-            self._camera_pip.set_compact(is_min)
+        # PIP adapts via _on_core_container_resize — no explicit compact toggle needed
 
     # ── Shortcut slots ────────────────────────────────────────────────────────
 
@@ -249,8 +247,7 @@ class MainWindow(QMainWindow):
                 self._start_camera(chosen.data())
 
     def _start_camera(self, index: int) -> None:
-        compact = state.breakpoint == "MIN"
-        self._camera_pip.start(compact, cam_index=index)
+        self._camera_pip.start(cam_index=index)
         state.camera_active = True
         self._status_bar.set_camera(True)
         self._reposition_pip()
@@ -443,9 +440,7 @@ class MainWindow(QMainWindow):
         self._status_bar.set_camera(False)
         notif.push("Cámara desactivada", "warn")
         cw, ch = self._core_container.width(), self._core_container.height()
-        self._giselo_core.setParent(self._core_container)
         self._giselo_core.setGeometry(0, 0, cw, ch)
-        self._giselo_core.show()
 
     def _refresh_drawer_if_open(self, name: str) -> None:
         if state.active_drawer != name or not self._drawer.is_open():
@@ -465,30 +460,29 @@ class MainWindow(QMainWindow):
     def _on_core_container_resize(self, event) -> None:
         QWidget.resizeEvent(self._core_container, event)
         cw, ch = event.size().width(), event.size().height()
-        if not self._camera_pip.active:
-            self._giselo_core.setGeometry(0, 0, cw, ch)
-        self._reposition_pip()
+        # GiseloCore always fills the container
+        self._giselo_core.setGeometry(0, 0, cw, ch)
+        # Clamp PIP so it stays within new container bounds
+        if self._camera_pip.active:
+            pip = self._camera_pip
+            x = max(0, min(pip.x(), cw - pip.width()))
+            y = max(0, min(pip.y(), ch - pip.height()))
+            pip.move(x, y)
 
     def _reposition_pip(self) -> None:
         if not self._camera_pip.active:
             return
         cw = self._core_container.width()
         ch = self._core_container.height()
-        # Camera fills full container
-        self._camera_pip.expand(cw, ch, state.accent)
-        self._camera_pip.setGeometry(0, 0, cw, ch)
-        # Re-parent GiseloCore into CameraPip so it renders above the native
-        # QVideoWidget child (Qt raise_() cannot beat a native window Z-order)
-        overlay_size = max(160, min(cw, ch) // 3)
-        self._giselo_core.setParent(self._camera_pip)
-        self._giselo_core.setGeometry(
-            cw - overlay_size - 12,
-            ch - overlay_size - 12,
-            overlay_size,
-            overlay_size,
-        )
-        self._giselo_core.show()
-        self._giselo_core.raise_()
+        # PIP: ~45% container width, 16:9, top-right corner
+        pip_w = max(220, int(cw * 0.45))
+        pip_h = int(pip_w * 9 / 16)
+        pip_w = min(pip_w, cw - 24)
+        pip_h = min(pip_h, ch - 24)
+        pip_x = cw - pip_w - 12
+        pip_y = 12
+        self._camera_pip.setGeometry(pip_x, pip_y, pip_w, pip_h)
+        self._camera_pip.raise_()
 
     def _on_busy_changed(self, busy: bool) -> None:
         self._input_bar.setEnabled(not busy)
