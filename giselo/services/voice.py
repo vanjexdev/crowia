@@ -8,18 +8,24 @@ log = logging.getLogger(__name__)
 
 
 class _TranscribeWorker(QThread):
-    done  = pyqtSignal(str)
-    error = pyqtSignal(str)
+    done              = pyqtSignal(str)
+    error             = pyqtSignal(str)
+    transcriber_ready = pyqtSignal(object)
 
-    def __init__(self, cfg: dict, wav_path: pathlib.Path, parent=None):
+    def __init__(self, cfg: dict, wav_path: pathlib.Path,
+                 transcriber=None, parent=None):
         super().__init__(parent)
-        self._cfg = cfg
-        self._wav_path = wav_path
+        self._cfg         = cfg
+        self._wav_path    = wav_path
+        self._transcriber = transcriber
 
     def run(self) -> None:
         try:
-            from crowia.transcriber import Transcriber
-            t = Transcriber(self._cfg)
+            t = self._transcriber
+            if t is None:
+                from crowia.transcriber import Transcriber
+                t = Transcriber(self._cfg)
+                self.transcriber_ready.emit(t)
             text = t.transcribe(self._wav_path)
             self.done.emit(text.strip())
         except Exception as e:
@@ -28,8 +34,6 @@ class _TranscribeWorker(QThread):
 
 
 class _LevelThread(threading.Thread):
-    """Runs a sounddevice InputStream in a daemon thread; calls `on_level(int 0-100)`."""
-
     def __init__(self, on_level, rate: int = 16000):
         super().__init__(daemon=True)
         self._on_level = on_level
@@ -69,9 +73,20 @@ class VoiceService(QObject):
         self._wav_path: pathlib.Path | None = None
         self._level_thread: _LevelThread | None = None
         self._worker: _TranscribeWorker | None = None
+        self._transcriber = None
 
         from crowia.recorder import Recorder
         self._recorder = Recorder(cfg)
+
+        threading.Thread(target=self._prewarm_whisper, daemon=True).start()
+
+    def _prewarm_whisper(self) -> None:
+        try:
+            from crowia.transcriber import Transcriber
+            self._transcriber = Transcriber(self._cfg)
+            log.info("Whisper pre-warmed")
+        except Exception as e:
+            log.warning("Whisper prewarm failed: %s", e)
 
     @property
     def recording(self) -> bool:
@@ -99,7 +114,12 @@ class VoiceService(QObject):
         self.stopped_recording.emit()
 
         if wav and wav.exists():
-            self._worker = _TranscribeWorker(self._cfg, wav, self)
+            self._worker = _TranscribeWorker(
+                self._cfg, wav, self._transcriber, self
+            )
+            self._worker.transcriber_ready.connect(
+                lambda t: setattr(self, "_transcriber", t)
+            )
             self._worker.done.connect(self._on_transcribed)
             self._worker.error.connect(self.error)
             self._worker.start()

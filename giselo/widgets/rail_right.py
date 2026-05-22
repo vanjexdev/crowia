@@ -5,8 +5,6 @@ from PyQt6.QtCore import pyqtSignal, Qt
 ITEMS = [
     ("◉", "voz"),
     ("◐", "camara"),
-    ("⊡", "expandir"),
-    ("✎", "editor"),
 ]
 
 

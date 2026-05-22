@@ -109,15 +109,38 @@ class _InputField(QPlainTextEdit):
         self._open_picker(pos)
 
     def _open_picker(self, at_pos: int) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, "Adjuntar archivo")
-        if not path:
-            return
-        # Replace the @ with the selected path
-        cursor = self.textCursor()
+        from PyQt6.QtWidgets import QMenu
+        from PyQt6.QtGui import QCursor
+        menu = QMenu(self)
+        menu.setStyleSheet("""
+            QMenu { background: #0f1a2e; color: #cfd6e6;
+                    border: 1px solid rgba(93,107,133,0.5);
+                    font-family: 'JetBrains Mono', monospace; font-size: 10px; }
+            QMenu::item { padding: 5px 14px; }
+            QMenu::item:selected { background: rgba(136,201,58,0.15); color: #88c93a; }
+        """)
+        act_file   = menu.addAction("📄  Adjuntar archivo")
+        act_screen = menu.addAction("📷  Capturar pantalla")
+        chosen = menu.exec(QCursor.pos())
+        if chosen == act_file:
+            path, _ = QFileDialog.getOpenFileName(self, "Adjuntar archivo")
+            if path:
+                self._insert_path(at_pos, path)
+        elif chosen == act_screen:
+            try:
+                import sys, os
+                sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+                from crowia.screen import take_screenshot
+                p = take_screenshot()
+                if p:
+                    self._insert_path(at_pos, str(p))
+            except Exception as e:
+                self._insert_path(at_pos, f"[screenshot error: {e}]")
+
+    def _insert_path(self, at_pos: int, path: str) -> None:
         doc = self.toPlainText()
         new_text = doc[: at_pos - 1] + path + doc[at_pos:]
         self.setPlainText(new_text)
-        # Move cursor to end of inserted path
         cursor = self.textCursor()
         cursor.setPosition(at_pos - 1 + len(path))
         self.setTextCursor(cursor)

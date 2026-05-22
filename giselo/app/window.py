@@ -40,6 +40,15 @@ class MainWindow(QMainWindow):
         self.resize(820, 640)
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
+        try:
+            import yaml, pathlib as _pl
+            _p = _pl.Path(__file__).parents[2] / "config.yaml"
+            _accent = yaml.safe_load(_p.read_text(encoding="utf-8")).get("ui", {}).get("accent")
+            if _accent:
+                state.accent = _accent
+        except Exception:
+            pass
+
         self.setStyleSheet(build_qss(state.accent))
 
         self._fullscreen = False
@@ -123,16 +132,18 @@ class MainWindow(QMainWindow):
         center_layout.setSpacing(0)
 
         # GiseloCore wrapped in a container so CameraPip can float over it
-        core_container = QWidget()
-        core_container.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        self._giselo_core = GiseloCore(core_container)
+        self._core_container = QWidget()
+        self._core_container.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self._giselo_core = GiseloCore(self._core_container)
         self._giselo_core.setGeometry(0, 0, 600, 400)
+        from PyQt6.QtGui import QColor as _QColor
+        self._giselo_core.set_accent(_QColor(state.accent))
 
-        self._camera_pip = CameraPip(core_container)
+        self._camera_pip = CameraPip(self._core_container)
         self._camera_pip.closed.connect(self._on_pip_closed)
 
-        core_container.resizeEvent = self._on_core_container_resize
-        center_layout.addWidget(core_container, stretch=1)
+        self._core_container.resizeEvent = self._on_core_container_resize
+        center_layout.addWidget(self._core_container, stretch=1)
 
         self._chat_preview = ChatPreview()
         center_layout.addWidget(self._chat_preview)
@@ -155,6 +166,7 @@ class MainWindow(QMainWindow):
 
     def _connect_signals(self) -> None:
         self._tab_dock.instance_changed.connect(self.switch_instance)
+        self._tab_dock.instance_add_requested.connect(self._on_add_instance)
         self._rail_left.drawer_toggled.connect(self.toggle_drawer)
         self._rail_right.action_triggered.connect(self._on_rail_right)
         self._input_bar.message_submitted.connect(self._on_message)
@@ -185,9 +197,7 @@ class MainWindow(QMainWindow):
         if not is_medium and self._drawer.is_open():
             self._drawer.close_drawer()
 
-        # Adjust PIP size on breakpoint change
-        if hasattr(self, "_camera_pip"):
-            self._camera_pip.set_compact(is_min)
+        # PIP adapts via _on_core_container_resize — no explicit compact toggle needed
 
     # ── Shortcut slots ────────────────────────────────────────────────────────
 
@@ -237,8 +247,7 @@ class MainWindow(QMainWindow):
                 self._start_camera(chosen.data())
 
     def _start_camera(self, index: int) -> None:
-        compact = state.breakpoint == "MIN"
-        self._camera_pip.start(compact, cam_index=index)
+        self._camera_pip.start(cam_index=index)
         state.camera_active = True
         self._status_bar.set_camera(True)
         self._reposition_pip()
@@ -252,6 +261,19 @@ class MainWindow(QMainWindow):
     def _on_accent(self, color: str) -> None:
         state.accent = color
         self.setStyleSheet(build_qss(color))
+        from PyQt6.QtGui import QColor
+        self._giselo_core.set_accent(QColor(color))
+        try:
+            from ruamel.yaml import YAML
+            import io, pathlib
+            _yaml = YAML(); _yaml.preserve_quotes = True
+            p = pathlib.Path(__file__).parents[2] / "config.yaml"
+            cfg = _yaml.load(p.read_text(encoding="utf-8"))
+            cfg.setdefault("ui", {})["accent"] = color
+            buf = io.StringIO(); _yaml.dump(cfg, buf)
+            p.write_text(buf.getvalue(), encoding="utf-8")
+        except Exception:
+            pass
 
     def close_drawer(self) -> None:
         if self._drawer.is_open():
@@ -265,8 +287,33 @@ class MainWindow(QMainWindow):
         mem_svc.set_active(name)
         self._tab_dock.set_active(name)
         self._status_bar.set_instance(name)
-        self._svc.switch_backend(name)
-        notif.push(f"Instancia: {name}", "info")
+        backend = state.INSTANCE_BACKENDS.get(name, "claude")
+        self._svc.switch_backend(backend)
+        notif.push(f"Instancia: {name} ({backend})", "info")
+        self._refresh_drawer_if_open("config")
+
+    def _on_add_instance(self) -> None:
+        from PyQt6.QtWidgets import QInputDialog
+        name, ok = QInputDialog.getText(
+            self, "Nueva instancia", "Nombre:",
+            text=f"claude-{len(state.INSTANCES) + 1}"
+        )
+        if not ok or not name.strip():
+            return
+        name = name.strip()
+        if name in state.INSTANCES:
+            return
+        backend, ok2 = QInputDialog.getItem(
+            self, "Backend", f"Backend para '{name}':",
+            ["claude", "codex", "opencode"], 0, False
+        )
+        if not ok2:
+            return
+        state.INSTANCES = list(state.INSTANCES) + [name]
+        state.INSTANCE_BACKENDS[name] = backend
+        self._tab_dock.add_instance(name)
+        self.switch_instance(name)
+        notif.push(f"Instancia '{name}' ({backend}) creada", "ok")
 
     def toggle_drawer(self, name: str) -> None:
         if state.active_drawer == name and self._drawer.is_open():
@@ -392,6 +439,8 @@ class MainWindow(QMainWindow):
         state.camera_active = False
         self._status_bar.set_camera(False)
         notif.push("Cámara desactivada", "warn")
+        cw, ch = self._core_container.width(), self._core_container.height()
+        self._giselo_core.setGeometry(0, 0, cw, ch)
 
     def _refresh_drawer_if_open(self, name: str) -> None:
         if state.active_drawer != name or not self._drawer.is_open():
@@ -409,18 +458,30 @@ class MainWindow(QMainWindow):
             self._drawer.scroll_to_bottom()
 
     def _on_core_container_resize(self, event) -> None:
-        QWidget.resizeEvent(self._giselo_core.parent(), event)
-        self._giselo_core.setGeometry(0, 0, event.size().width(), event.size().height())
-        self._reposition_pip()
+        QWidget.resizeEvent(self._core_container, event)
+        cw, ch = event.size().width(), event.size().height()
+        # GiseloCore always fills the container
+        self._giselo_core.setGeometry(0, 0, cw, ch)
+        # Clamp PIP so it stays within new container bounds
+        if self._camera_pip.active:
+            pip = self._camera_pip
+            x = max(0, min(pip.x(), cw - pip.width()))
+            y = max(0, min(pip.y(), ch - pip.height()))
+            pip.move(x, y)
 
     def _reposition_pip(self) -> None:
         if not self._camera_pip.active:
             return
-        cw = self._giselo_core.width()
-        pip_w = self._camera_pip.width()
-        pip_h = self._camera_pip.height()
-        x = (cw - pip_w) // 2
-        self._camera_pip.move(x, 12)
+        cw = self._core_container.width()
+        ch = self._core_container.height()
+        # PIP: ~45% container width, 16:9, top-right corner
+        pip_w = max(220, int(cw * 0.45))
+        pip_h = int(pip_w * 9 / 16)
+        pip_w = min(pip_w, cw - 24)
+        pip_h = min(pip_h, ch - 24)
+        pip_x = cw - pip_w - 12
+        pip_y = 12
+        self._camera_pip.setGeometry(pip_x, pip_y, pip_w, pip_h)
         self._camera_pip.raise_()
 
     def _on_busy_changed(self, busy: bool) -> None:
