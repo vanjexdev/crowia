@@ -5,6 +5,7 @@ from PyQt6.QtGui import QColor
 
 from giselo.app.theme import build_qss, LIME, CYAN, ORANGE, MUTE
 from giselo.app.state import state
+from giselo.services.instances import InstanceService
 from giselo.widgets.title_bar    import TitleBar
 from giselo.widgets.tab_dock     import TabDock
 from giselo.widgets.rail_left    import RailLeft
@@ -39,9 +40,16 @@ class MainWindow(QMainWindow):
 
         self._fullscreen = False
         self._drawers: dict[str, Drawer] = {}
+        self._response_buf = ""
         self._build_ui()
         self._connect_signals()
         self._apply_breakpoint(self.width())
+
+        self._svc = InstanceService(self)
+        self._svc.chunk_received.connect(self._on_chunk)
+        self._svc.response_complete.connect(self._on_response_done)
+        self._svc.response_error.connect(self._on_response_error)
+        self._svc.busy_changed.connect(self._on_busy_changed)
 
         from giselo.app import shortcuts
         shortcuts.register(self)
@@ -218,10 +226,44 @@ class MainWindow(QMainWindow):
     def _on_message(self, text: str) -> None:
         from datetime import datetime
         ts = datetime.now().strftime("%H:%M")
+        self._response_buf = ""
         self._chat_preview.update_user(text, ts)
         self._giselo_core.set_state("thinking")
         self._giselo_core.set_pill_text("● PROCESANDO")
-        # Backend integration in Phase C
+        self._input_bar.setEnabled(False)
+        self._svc.ask(text)
+
+    def _on_chunk(self, chunk: str) -> None:
+        self._response_buf += chunk
+        self._giselo_core.set_state("speaking")
+        self._giselo_core.set_pill_text("● RESPONDIENDO")
+        from datetime import datetime
+        ts = datetime.now().strftime("%H:%M")
+        self._chat_preview.update_giselo(self._response_buf, ts)
+
+    def _on_response_done(self, full: str) -> None:
+        from datetime import datetime
+        ts = datetime.now().strftime("%H:%M")
+        self._chat_preview.update_giselo(full, ts)
+        self._giselo_core.set_state("success")
+        self._giselo_core.set_pill_text("● LISTO")
+        from PyQt6.QtCore import QTimer
+        QTimer.singleShot(1500, lambda: (
+            self._giselo_core.set_state("idle"),
+            self._giselo_core.set_pill_text("● ESCUCHANDO · LVL 0%"),
+        ))
+
+    def _on_response_error(self, msg: str) -> None:
+        self._giselo_core.set_state("error")
+        self._giselo_core.set_pill_text("● ERROR")
+        self._chat_preview.update_giselo(f"Error: {msg}", "--:--")
+
+    def _on_busy_changed(self, busy: bool) -> None:
+        self._input_bar.setEnabled(not busy)
+        if not busy:
+            state.giselo_state = "idle"
+        state.mem_tokens = len(str(self._response_buf)) // 4
+        self._status_bar.set_mem(state.mem_tokens)
 
     def sizeHint(self) -> QSize:
         return QSize(820, 640)
