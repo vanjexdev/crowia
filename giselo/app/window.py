@@ -54,6 +54,8 @@ class MainWindow(QMainWindow):
         self._fullscreen = False
         self._drawers: dict[str, Drawer] = {}
         self._response_buf = ""
+        self._sentence_buf = ""
+        self._tts_streaming = False
         self._palette = PalettePopup(self)
         self._palette.accent_selected.connect(self._on_accent)
         self._build_ui()
@@ -398,6 +400,8 @@ class MainWindow(QMainWindow):
         from datetime import datetime
         ts = datetime.now().strftime("%H:%M")
         self._response_buf = ""
+        self._sentence_buf = ""
+        self._tts_streaming = False
         self._chat_preview.update_user(text, ts)
         self._giselo_core.set_state("thinking")
         self._giselo_core.set_pill_text("● PROCESANDO")
@@ -405,12 +409,29 @@ class MainWindow(QMainWindow):
         self._svc.ask(text)
 
     def _on_chunk(self, chunk: str) -> None:
-        self._response_buf += chunk
+        from crowia.output import _split_sentences
+        from datetime import datetime
+        # Support both accumulated (most backends) and delta chunk formats
+        if chunk.startswith(self._response_buf):
+            delta = chunk[len(self._response_buf):]
+            self._response_buf = chunk
+        else:
+            delta = chunk
+            self._response_buf += chunk
         self._giselo_core.set_state("speaking")
         self._giselo_core.set_pill_text("● RESPONDIENDO")
-        from datetime import datetime
         ts = datetime.now().strftime("%H:%M")
         self._chat_preview.update_giselo(self._response_buf, ts)
+        if not delta:
+            return
+        self._sentence_buf += delta
+        sentences, self._sentence_buf = _split_sentences(self._sentence_buf)
+        for sent in sentences:
+            if not self._tts_streaming:
+                self._tts.begin_stream(sent)
+                self._tts_streaming = True
+            else:
+                self._tts.stream_sentence(sent)
 
     def _on_response_done(self, full: str) -> None:
         from datetime import datetime
@@ -420,12 +441,21 @@ class MainWindow(QMainWindow):
         self._giselo_core.set_pill_text("● LISTO")
         notif.push("Respuesta recibida", "ok")
         self._refresh_drawer_if_open("historial")
-        self._tts.speak(full)
-        from PyQt6.QtCore import QTimer
-        QTimer.singleShot(1500, lambda: (
-            self._giselo_core.set_state("speaking" if self._tts._worker else "idle"),
-            self._giselo_core.set_pill_text("● HABLANDO" if self._tts._worker else "● ESCUCHANDO · LVL 0%"),
-        ))
+        # Flush remaining sentence buffer (text after last punctuation)
+        remaining = self._sentence_buf.strip()
+        self._sentence_buf = ""
+        if remaining:
+            if not self._tts_streaming:
+                self._tts.begin_stream(remaining)
+                self._tts_streaming = True
+            else:
+                self._tts.stream_sentence(remaining)
+        if self._tts_streaming:
+            self._tts.end_stream()
+        elif not remaining:
+            # No TTS started at all (TTS disabled or empty response)
+            pass
+        self._tts_streaming = False
 
     def _on_response_error(self, msg: str) -> None:
         self._giselo_core.set_state("error")

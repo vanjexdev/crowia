@@ -9,6 +9,68 @@ log = logging.getLogger(__name__)
 
 _say_voice_cache: dict[str, str | None] = {}
 
+_SENT_END = re.compile(r'(?<=[.!?…])\s')
+
+
+def _split_sentences(buf: str) -> tuple[list[str], str]:
+    """Split buf into (complete_sentences, remainder). Boundary = .!?… followed by whitespace."""
+    parts = _SENT_END.split(buf)
+    if len(parts) == 1:
+        return [], buf
+    complete = [p.strip() for p in parts[:-1] if p.strip()]
+    return complete, parts[-1]
+
+
+class StreamingTTSPlayer:
+    """Keeps piper + aplay alive across multiple sentences (Linux only)."""
+
+    def __init__(self, tts_cmd: list[str]):
+        cmd = [str(pathlib.Path(c).expanduser()) if c.startswith("~") else c
+               for c in tts_cmd]
+        self._piper = subprocess.Popen(
+            cmd,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+        )
+        self._aplay = subprocess.Popen(
+            ["aplay", "-r", "22050", "-f", "S16_LE", "-t", "raw", "-"],
+            stdin=self._piper.stdout,
+            stderr=subprocess.DEVNULL,
+        )
+        self._piper.stdout.close()
+
+    def write(self, sentence: str) -> None:
+        text = _strip_markdown(sentence).strip()
+        if not text:
+            return
+        try:
+            self._piper.stdin.write((text + "\n").encode())
+            self._piper.stdin.flush()
+        except (BrokenPipeError, OSError):
+            pass
+
+    def finish(self) -> None:
+        try:
+            self._piper.stdin.close()
+        except OSError:
+            pass
+        try:
+            self._aplay.wait(timeout=120)
+        except subprocess.TimeoutExpired:
+            self._aplay.kill()
+        try:
+            self._piper.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            self._piper.kill()
+
+    def stop(self) -> None:
+        for proc in (self._piper, self._aplay):
+            try:
+                proc.kill()
+            except Exception:
+                pass
+
 
 def _best_say_voice(lang: str) -> str | None:
     """Return best `say -v` voice for lang (ISO 639-1). Cached after first call."""
