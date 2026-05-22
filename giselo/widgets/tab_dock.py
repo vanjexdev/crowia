@@ -11,7 +11,8 @@ INSTANCE_META = {
 
 
 class TabDock(QWidget):
-    instance_changed = pyqtSignal(str)
+    instance_changed     = pyqtSignal(str)
+    instance_add_requested = pyqtSignal()
 
     def __init__(self, instances: list[str], active: str, parent=None):
         super().__init__(parent)
@@ -32,6 +33,7 @@ class TabDock(QWidget):
         add_btn.setProperty("tabAdd", True)
         add_btn.setFixedHeight(44)
         add_btn.setCursor(__import__("PyQt6.QtCore", fromlist=["Qt"]).Qt.CursorShape.PointingHandCursor)
+        add_btn.clicked.connect(self.instance_add_requested)
         layout.addWidget(add_btn)
         layout.addStretch()
 
@@ -46,6 +48,13 @@ class TabDock(QWidget):
         btn.setCursor(__import__("PyQt6.QtCore", fromlist=["Qt"]).Qt.CursorShape.PointingHandCursor)
         btn.clicked.connect(lambda _, n=name: self.instance_changed.emit(n))
         return btn
+
+    def add_instance(self, name: str) -> None:
+        btn = self._make_tab(name)
+        self._buttons[name] = btn
+        layout = self.layout()
+        layout.insertWidget(layout.count() - 2, btn)
+        self.set_active(name)
 
     def set_active(self, name: str) -> None:
         for inst, btn in self._buttons.items():
