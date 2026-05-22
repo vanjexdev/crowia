@@ -24,7 +24,7 @@ NUM_BARS     = 26
 RING_OPACITIES = [0.45, 0.36, 0.27, 0.20, 0.13]
 TICK_COUNT   = 24
 FADE_STEPS   = 8          # ~250ms at 30fps
-BREATH_SPEED = 0.018      # radians per tick → ~3s full cycle at 30fps
+BREATH_SPEED = 0.012      # radians per tick → ~5s full cycle at 30fps
 
 
 class GiseloCore(QWidget):
@@ -99,7 +99,7 @@ class GiseloCore(QWidget):
         # Breathing (idle only)
         if self._state == "idle":
             self._breath_phase = (self._breath_phase + BREATH_SPEED) % (2 * math.pi)
-            self._breath_scale = 1.0 + 0.03 * math.sin(self._breath_phase)
+            self._breath_scale = 1.0 + 0.012 * math.sin(self._breath_phase)
         else:
             self._breath_scale = 1.0
 
