@@ -23,13 +23,19 @@ os.environ.setdefault("MOZ_ENABLE_WAYLAND", "1")
 from playwright.async_api import async_playwright, Page, BrowserContext, Playwright
 
 _args = argparse.ArgumentParser()
-_args.add_argument("--browser", default="firefox", choices=["firefox", "chromium", "chrome"])
-BROWSER_TYPE = _args.parse_args().browser
+_args.add_argument("--browser",  default="firefox", choices=["firefox", "chromium", "chrome"])
+_args.add_argument("--socket",   default="/tmp/crowia/browser.sock")
+_args.add_argument("--pid",      default="/tmp/crowia/browser.pid")
+_args.add_argument("--log",      default="/tmp/crowia/browser.log")
+_args.add_argument("--headless", action="store_true", default=False)
+_parsed      = _args.parse_args()
+BROWSER_TYPE = _parsed.browser
+HEADLESS     = _parsed.headless
 
-SOCKET_PATH  = pathlib.Path("/tmp/crowia/browser.sock")
-PID_FILE     = pathlib.Path("/tmp/crowia/browser.pid")
+SOCKET_PATH  = pathlib.Path(_parsed.socket)
+PID_FILE     = pathlib.Path(_parsed.pid)
 PROFILE_DIR  = pathlib.Path.home() / f".config/crowia/browser-profile/{BROWSER_TYPE}"
-LOG_FILE     = pathlib.Path("/tmp/crowia/browser.log")
+LOG_FILE     = pathlib.Path(_parsed.log)
 EXTRACT_MAX  = 10_000
 
 logging.basicConfig(
@@ -58,16 +64,16 @@ async def launch_context():
         log.info("Launching %s context...", BROWSER_TYPE)
         if BROWSER_TYPE == "firefox":
             context = await pw_instance.firefox.launch_persistent_context(
-                str(PROFILE_DIR), headless=False,
+                str(PROFILE_DIR), headless=HEADLESS,
             )
         elif BROWSER_TYPE == "chrome":
             context = await pw_instance.chromium.launch_persistent_context(
-                str(PROFILE_DIR), headless=False, channel="chrome",
+                str(PROFILE_DIR), headless=HEADLESS, channel="chrome",
             )
         else:
             import shutil
             sys_chromium = shutil.which("chromium") or shutil.which("chromium-browser")
-            chromium_kwargs: dict = {"headless": False}
+            chromium_kwargs: dict = {"headless": HEADLESS}
             if sys_chromium:
                 chromium_kwargs["executable_path"] = sys_chromium
             context = await pw_instance.chromium.launch_persistent_context(

@@ -1,83 +1,114 @@
 hotkey:
-    keys: ["KEY_RIGHTCTRL", "KEY_GRAVE"] # Right-Ctrl + Backtick
-    mode: "toggle"
-    max_record_seconds: 300
-
+  keys:
+  - KEY_RIGHTCTRL
+  - KEY_GRAVE
+  mode: toggle
+  max_record_seconds: 300
 audio:
-    device: "default"
-    channels: 1
-    rate: 16000
-    format: "S16_LE"
-    tmp_dir: "/tmp/crowia"
-
+  device: default
+  channels: 1
+  rate: 16000
+  format: S16_LE
+  tmp_dir: /tmp/crowia
 whisper:
-    model: "small"
-    language: "es"
-    device: "cpu"
-    compute_type: "int8"
-    venv: ""
-    initial_prompt: "Giselo, oye giselo, hey giselo, abre Firefox, abre la terminal, busca, qué es, cómo se hace, mira la pantalla, sube el volumen, baja el volumen."
-
+  model: medium
+  language: es
+  device: cpu
+  compute_type: int8
+  venv: ''
+  initial_prompt: Giselo, oye giselo, hey giselo, abre Firefox, abre la 
+    terminal, busca, qué es, cómo se hace, mira la pantalla, sube el volumen, 
+    baja el volumen.
 claude:
-    model: "claude-haiku-4-5" # haiku: rápido para voz | sonnet: mejor para código/tareas complejas
-    api_key: "" # solo para screenshots — deja vacío para usar ANTHROPIC_API_KEY del env
-    system_prompt: 'Tu nombre es Giselo. NUNCA te identifiques como Claude, Anthropic, ni ningún otro nombre — siempre eres Giselo. Si alguien pregunta quién eres, di que eres Giselo, el asistente personal del usuario. Si preguntan cómo te sientes, responde brevemente en primera persona como Giselo. Eres un asistente de voz conciso en español. Responde de forma breve y directa. Usa solo texto plano, sin asteriscos, sin markdown, sin emojis, sin listas con guiones. Cuando analices imágenes de pantalla, describe lo que ves. Tienes acceso real al sistema Linux del usuario mediante herramientas Bash. PUEDES y DEBES abrir aplicaciones usando comandos: usa ''zeditor'' para abrir Zed editor, usa ''alacritty'' para abrir terminal. Ejecuta estos comandos en segundo plano con ''&'' para no bloquear. Cuando el usuario pida abrir una app, ejecútala directamente sin preguntar ni poner excusas. REGLA CRÍTICA — NAVEGADOR: NUNCA uses el comando ''firefox'' directamente. Para TODO lo relacionado con el navegador (abrir Firefox, navegar a páginas, buscar en internet, YouTube, Google, cualquier web) USA SIEMPRE y ÚNICAMENTE ''giselo-browser''. Si usas ''firefox'' además de ''giselo-browser'' se abrirán dos ventanas — eso es un error. Si necesitas información del usuario (como un nombre, ruta, texto), usa el comando ''giselo-ask "Tu pregunta aquí"'' que muestra un diálogo y devuelve la respuesta. Para operaciones sudo usa ''sudo -A comando'' — el sistema mostrará un diálogo gráfico de contraseña automáticamente. Cuando el usuario mencione una carpeta, archivo o ruta y no quede claro el path exacto, usa ''giselo-pick --dir'' para selector de carpetas o ''giselo-pick'' para selector de archivos — abre un explorador gráfico y devuelve el path elegido. Tienes control total de Firefox mediante Playwright usando el comando ''giselo-browser''. Comandos: ''giselo-browser navigate URL'' para navegar, ''giselo-browser click TEXTO'' para hacer click, ''giselo-browser type TEXTO'' para escribir en el campo activo, ''giselo-browser key Enter'' para presionar teclas, ''giselo-browser extract'' para leer contenido, ''giselo-browser screenshot'' para capturar. El browser Firefox arranca automáticamente con el primer comando. Para tareas de múltiples pasos (navegar + buscar + click) ejecuta los comandos uno tras otro en secuencia. NUNCA digas que no tienes acceso al navegador — siempre usa giselo-browser.'
-    timeout_seconds: 300
-
+  model: claude-haiku-4-5
+  api_key: ''
+  system_prompt: 'Tu nombre es Giselo. NUNCA te identifiques como Claude, Anthropic,
+    ni ningún otro nombre — siempre eres Giselo. Si alguien pregunta quién eres, di
+    que eres Giselo, el asistente personal del usuario. Si preguntan cómo te sientes,
+    responde brevemente en primera persona como Giselo. Eres un asistente de voz conciso
+    en español. Responde de forma breve y directa. Usa solo texto plano, sin asteriscos,
+    sin markdown, sin emojis, sin listas con guiones. Cuando analices imágenes de
+    pantalla, describe lo que ves. Tienes acceso real al sistema Linux del usuario
+    mediante herramientas Bash. PUEDES y DEBES abrir aplicaciones usando comandos:
+    usa ''zeditor'' para abrir Zed editor, usa ''alacritty'' para abrir terminal.
+    Ejecuta estos comandos en segundo plano con ''&'' para no bloquear. Cuando el
+    usuario pida abrir una app, ejecútala directamente sin preguntar ni poner excusas.
+    REGLA CRÍTICA — NAVEGADOR: Tienes DOS browsers y debes elegir el correcto según
+    la tarea. NUNCA uses ''firefox'' ni ''chromium'' directamente como comandos.
+    BROWSER 1 — giselo-browser (Firefox, sesión activa del usuario): Usa para YouTube,
+    Google, Gmail, Twitch, redes sociales, cualquier web que requiera estar logueado,
+    búsquedas generales, música, videos. Comandos: ''giselo-browser navigate URL'',
+    ''giselo-browser click TEXTO'', ''giselo-browser type TEXTO'', ''giselo-browser
+    key Enter'', ''giselo-browser extract'', ''giselo-browser screenshot''.
+    BROWSER 2 — giselo-playwright (Chromium, sin sesión, para debugging/automatización):
+    Usa para debugging de errores web, inspeccionar páginas, testing de formularios,
+    scraping de contenido público, automatización técnica. Por defecto abre ventana
+    visible (headed) para que puedas ver qué pasa. Para scraping silencioso agrega
+    --headless antes de la acción: ''giselo-playwright --headless extract''. Mismos
+    comandos: ''giselo-playwright navigate URL'', ''giselo-playwright click TEXTO'',
+    ''giselo-playwright eval CÓDIGO_JS'', ''giselo-playwright screenshot''. También
+    soporta ''giselo-playwright console'' para capturar errores JS de la página.
+    Si necesitas información del usuario (como un nombre, ruta, texto),
+    usa el comando ''giselo-ask "Tu pregunta aquí"'' que muestra un diálogo y devuelve
+    la respuesta. Para operaciones sudo usa ''sudo -A comando'' — el sistema mostrará
+    un diálogo gráfico de contraseña automáticamente. Cuando el usuario mencione una
+    carpeta, archivo o ruta y no quede claro el path exacto, usa ''giselo-pick --dir''
+    para selector de carpetas o ''giselo-pick'' para selector de archivos — abre un
+    explorador gráfico y devuelve el path elegido. Para tareas de múltiples pasos
+    ejecuta los comandos uno tras otro en secuencia. NUNCA digas que no tienes acceso
+    al navegador.'
+  allowed_tools: WebSearch Bash(git *) Bash(zeditor*) Bash(alacritty*) Bash(giselo-ask*)
+    Bash(giselo-askpass*) Bash(giselo-pick*) Bash(giselo-browser*) Bash(giselo-playwright*)
+    Bash(giselo-google*) Bash(giselo-remind*) Read Edit Write
+  timeout_seconds: 300
 browser:
-    type: "chromium" # firefox | chromium | chrome (sistema)
-
-backend: "claude" # claude | codex | opencode
-
+  type: chromium
+backend: claude
 codex:
-    model: "" # dejar vacío para usar el default de codex
-    sandbox: "danger-full-access" # read-only | workspace-write | danger-full-access
-    working_dir: "" # path fijo de trabajo; si vacío usa el dir del archivo mencionado
-
+  model: ''
+  sandbox: danger-full-access
+  working_dir: ''
 opencode:
-    model: "opencode/minimax-m2.5-free" # ver modelos: opencode models
-
+  model: opencode-go/minimax-m2.7
 always_on:
-    wake_phrases: ["oye giselo", "hey giselo", "giselo"]
-    vad_aggressiveness: 2 # 0-3 (3 = más agresivo, ignora más ruido)
-    silence_duration_ms: 800 # ms de silencio para cortar utterance
-    min_speech_ms: 400 # mínimo de voz para procesar
-    max_record_seconds: 30
-
+  wake_phrases:
+  - oye giselo
+  - hey giselo
+  - giselo
+  vad_aggressiveness: 2
+  silence_duration_ms: 800
+  min_speech_ms: 400
+  max_record_seconds: 30
 history:
-    enabled: true
-    path: "~/.config/crowia/history.json"
-    max_turns: 10
-
+  enabled: true
+  path: ~/.config/crowia/history.json
+  max_turns: 10
 output:
-    notify_max_chars: 400
-    notify_timeout_ms: 8000
-    response_file: "/tmp/crowia/last_response.txt"
-    tts_enabled: true
-    tts_command:
-        [
-            "piper-tts",
-            "--model",
-            "/home/jesusu/.local/share/piper/es_ES-davefx-medium.onnx",
-            "--output_raw",
-        ]
-    response_width: 600
-    response_height: 420
-
+  notify_max_chars: 400
+  notify_timeout_ms: 8000
+  response_file: /tmp/crowia/last_response.txt
+  tts_enabled: true
+  tts_command:
+  - piper-tts
+  - --model
+  - /home/jesusu/.local/share/piper/es_ES-davefx-medium.onnx
+  - --output_raw
+  response_width: 600
+  response_height: 420
 server:
-    auth:
-        enabled: false # true para VPS/internet, false en Tailscale/local
-        username: "vanjex"
-        # Generar hash: python3 -c "from crowia.server.auth import hash_password; print(hash_password('TU_CLAVE'))"
-        password_hash: "$2b$12$X3YBmgUL6K5E1ZClwnq7O.zVyPfwH1jl2qPt3bFSV2k1RA92Os6E6"
-        # Generar secret: python3 -c "from crowia.server.auth import random_secret; print(random_secret())"
-        token_secret: "88543faa5f1086ddab3c9992b756779dad91558d8915c5ab9407b07aac27e949"
-        token_expire_hours: 72
-
+  auth:
+    enabled: false
+    username: vanjex
+    password_hash: $2b$12$X3YBmgUL6K5E1ZClwnq7O.zVyPfwH1jl2qPt3bFSV2k1RA92Os6E6
+    token_secret: 
+      88543faa5f1086ddab3c9992b756779dad91558d8915c5ab9407b07aac27e949
+    token_expire_hours: 72
 skills:
-    path: "skills/"
-    enabled:
-        - cachyos-kde
-        - google
-        - remind
-        - browser
+  path: skills/
+  enabled:
+  - cachyos-kde
+  - google
+  - remind
+  - browser
+ui:
+  accent: '#88c93a'

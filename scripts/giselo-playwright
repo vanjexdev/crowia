@@ -1,0 +1,264 @@
+#!/home/jesusu/Workspace/agents/crowia/.venv/bin/python3
+"""
+giselo-playwright [--headless] <acción> [args...]
+Cliente CLI para debugging/automatización con Chromium via Playwright.
+Usa una instancia SEPARADA de la de giselo-browser (Firefox).
+
+Cuándo usar giselo-playwright (Chromium):
+  - Debugging de errores web, inspeccionar DOM/consola
+  - Testing de formularios y flujos sin sesión activa
+  - Scraping de contenido público
+  - Automatización que no necesita estar logueado a Google/YouTube
+
+Cuándo usar giselo-browser (Firefox):
+  - YouTube, Google, Gmail, redes sociales (sesión activa)
+  - Cualquier web que requiera login del usuario
+
+Acciones:
+  start [--headless]            Iniciar daemon Chromium explícitamente
+  stop                          Detener daemon Chromium
+  status                        URL y título actuales
+  navigate <url>                Navegar a URL
+  click <selector|texto>        Click en elemento (CSS selector o texto visible)
+  type <texto>                  Escribir texto en elemento enfocado
+  fill <selector> <texto>       Llenar campo de formulario
+  key <tecla>                   Presionar tecla (Enter, Tab, Escape, ArrowDown...)
+  extract [--selector S] [--format text|html|links]  Extraer contenido
+  screenshot [ruta]             Capturar pantalla
+  scroll [up|down] [cantidad]   Scroll (default: down 3)
+  tabs                          Listar pestañas
+  new-tab                       Abrir nueva pestaña
+  close-tab                     Cerrar pestaña actual
+  switch-tab <n>                Cambiar a pestaña n
+  wait <ms>                     Esperar ms milisegundos
+  eval <código_js>              Ejecutar JavaScript (útil para debugging)
+  console                       Capturar errores de consola JS (eval)
+
+Flags globales (antes de la acción):
+  --headless    Modo sin ventana visible (para scraping silencioso)
+  --headed      Modo con ventana visible — DEFAULT para debugging
+"""
+
+import json
+import os
+import pathlib
+import socket
+import subprocess
+import sys
+import time
+
+SOCKET_PATH = pathlib.Path("/tmp/crowia/playwright.sock")
+PID_FILE    = pathlib.Path("/tmp/crowia/playwright.pid")
+LOG_FILE    = pathlib.Path("/tmp/crowia/playwright.log")
+DAEMON      = pathlib.Path(__file__).parent / "giselo-browser-daemon"
+SCREENSHOT_DEFAULT = "/tmp/crowia/playwright_screenshot.png"
+
+
+def is_running() -> bool:
+    if not SOCKET_PATH.exists():
+        return False
+    try:
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.settimeout(2)
+        s.connect(str(SOCKET_PATH))
+        s.close()
+        return True
+    except OSError:
+        return False
+
+
+def kill_stale() -> None:
+    try:
+        result = subprocess.run(
+            ["pgrep", "-f", f"giselo-browser-daemon.*playwright"],
+            capture_output=True, text=True,
+        )
+        for pid in result.stdout.strip().split():
+            try:
+                os.kill(int(pid), 15)
+            except ProcessLookupError:
+                pass
+        time.sleep(0.4)
+    except Exception:
+        pass
+    SOCKET_PATH.unlink(missing_ok=True)
+
+
+def start_daemon(headless: bool = False) -> None:
+    if is_running():
+        return
+    kill_stale()
+    uid = os.getuid()
+    env = os.environ.copy()
+    env.setdefault("WAYLAND_DISPLAY", "wayland-0")
+    env.setdefault("DISPLAY", ":0")
+    env.setdefault("XDG_RUNTIME_DIR", f"/run/user/{uid}")
+    env.setdefault("DBUS_SESSION_BUS_ADDRESS", f"unix:path=/run/user/{uid}/bus")
+    pathlib.Path("/tmp/crowia").mkdir(parents=True, exist_ok=True)
+    cmd = [
+        str(DAEMON),
+        "--browser", "chromium",
+        "--socket",  str(SOCKET_PATH),
+        "--pid",     str(PID_FILE),
+        "--log",     str(LOG_FILE),
+    ]
+    if headless:
+        cmd.append("--headless")
+    log_f = open(LOG_FILE, "a")
+    subprocess.Popen(cmd, start_new_session=True, stdout=log_f, stderr=log_f, env=env)
+    for _ in range(40):
+        if is_running():
+            return
+        time.sleep(0.3)
+    print("Error: daemon playwright no respondió. Revisa /tmp/crowia/playwright.log", file=sys.stderr)
+    sys.exit(1)
+
+
+def send(cmd: dict) -> dict:
+    data = json.dumps(cmd).encode() + b"\n"
+    s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    s.connect(str(SOCKET_PATH))
+    s.sendall(data)
+    response = b""
+    while True:
+        chunk = s.recv(65536)
+        if not chunk:
+            break
+        response += chunk
+        if b"\n" in response:
+            break
+    s.close()
+    return json.loads(response.decode().strip())
+
+
+def run(cmd: dict, headless: bool = False) -> int:
+    start_daemon(headless=headless)
+    result = send(cmd)
+    if result.get("ok"):
+        print(result.get("result", ""))
+        return 0
+    else:
+        print(f"Error: {result.get('error', 'desconocido')}", file=sys.stderr)
+        return 1
+
+
+def main():
+    args = sys.argv[1:]
+    if not args:
+        print(__doc__)
+        sys.exit(0)
+
+    # Parse global --headless / --headed flag
+    headless = False
+    filtered = []
+    for a in args:
+        if a == "--headless":
+            headless = True
+        elif a == "--headed":
+            headless = False
+        else:
+            filtered.append(a)
+    args = filtered
+
+    if not args:
+        print(__doc__)
+        sys.exit(0)
+
+    action = args[0].lower()
+
+    if action == "start":
+        start_daemon(headless=headless)
+        mode = "headless" if headless else "headed"
+        print(f"Daemon Playwright (Chromium, {mode}) iniciado.")
+        return
+
+    if action == "stop":
+        if not is_running():
+            print("Daemon Playwright no está corriendo.")
+            return
+        result = send({"action": "stop"})
+        print(result.get("result", "Detenido."))
+        return
+
+    if action == "status":
+        sys.exit(run({"action": "status"}, headless))
+
+    if action == "navigate":
+        url = args[1] if len(args) > 1 else ""
+        sys.exit(run({"action": "navigate", "url": url}, headless))
+
+    if action == "click":
+        target = " ".join(args[1:])
+        if any(c in target for c in ".#[>:()"):
+            sys.exit(run({"action": "click", "selector": target}, headless))
+        else:
+            sys.exit(run({"action": "click", "text": target}, headless))
+
+    if action == "type":
+        text = " ".join(args[1:])
+        sys.exit(run({"action": "type", "text": text}, headless))
+
+    if action == "fill":
+        selector = args[1] if len(args) > 1 else ""
+        text = " ".join(args[2:]) if len(args) > 2 else ""
+        sys.exit(run({"action": "fill", "selector": selector, "text": text}, headless))
+
+    if action == "key":
+        key = args[1] if len(args) > 1 else "Enter"
+        sys.exit(run({"action": "key", "key": key}, headless))
+
+    if action == "extract":
+        cmd: dict = {"action": "extract"}
+        i = 1
+        while i < len(args):
+            if args[i] == "--selector" and i + 1 < len(args):
+                cmd["selector"] = args[i + 1]
+                i += 2
+            elif args[i] == "--format" and i + 1 < len(args):
+                cmd["format"] = args[i + 1]
+                i += 2
+            else:
+                i += 1
+        sys.exit(run(cmd, headless))
+
+    if action == "screenshot":
+        path = args[1] if len(args) > 1 else SCREENSHOT_DEFAULT
+        sys.exit(run({"action": "screenshot", "path": path}, headless))
+
+    if action == "scroll":
+        direction = args[1] if len(args) > 1 else "down"
+        amount = int(args[2]) if len(args) > 2 else 3
+        sys.exit(run({"action": "scroll", "direction": direction, "amount": amount}, headless))
+
+    if action == "tabs":
+        sys.exit(run({"action": "tabs"}, headless))
+
+    if action in ("new-tab", "new_tab"):
+        sys.exit(run({"action": "new_tab"}, headless))
+
+    if action in ("close-tab", "close_tab"):
+        sys.exit(run({"action": "close_tab"}, headless))
+
+    if action in ("switch-tab", "switch_tab"):
+        idx = int(args[1]) if len(args) > 1 else 1
+        sys.exit(run({"action": "switch_tab", "index": idx}, headless))
+
+    if action == "wait":
+        ms = int(args[1]) if len(args) > 1 else 1000
+        sys.exit(run({"action": "wait", "ms": ms}, headless))
+
+    if action == "eval":
+        code = " ".join(args[1:])
+        sys.exit(run({"action": "eval", "code": code}, headless))
+
+    if action == "console":
+        # Captura errores de consola — útil para debugging
+        code = "JSON.stringify(window.__playwright_console_errors || [])"
+        sys.exit(run({"action": "eval", "code": code}, headless))
+
+    print(f"Acción desconocida: '{action}'. Usa 'giselo-playwright' sin args para ver ayuda.")
+    sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
