@@ -17,6 +17,9 @@ class AppState:
     build: str = "phase-a"
 
     INSTANCES: list = field(default_factory=lambda: ["opencode", "claude", "codex"])
+    INSTANCE_BACKENDS: dict = field(default_factory=lambda: {
+        "opencode": "opencode", "claude": "claude", "codex": "codex"
+    })
     DRAWERS: tuple = ("memoria", "historial", "sistema", "cola", "notif")
 
     def toggle_drawer(self, name: str) -> None:

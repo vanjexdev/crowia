@@ -140,12 +140,24 @@ class CameraPip(QWidget):
         self.hide()
         self.closed.emit()
 
+    def expand(self, w: int, h: int, accent: str = "#88c93a") -> None:
+        self.setMinimumSize(0, 0)
+        self.setMaximumSize(16777215, 16777215)
+        self.resize(w, h)
+        from PyQt6.QtWidgets import QGraphicsDropShadowEffect
+        glow = QGraphicsDropShadowEffect(self)
+        glow.setBlurRadius(48)
+        glow.setColor(QColor(accent))
+        glow.setOffset(0, 0)
+        self.setGraphicsEffect(glow)
+
     def set_compact(self, compact: bool) -> None:
         if not self._active:
             return
         w = PIP_W_MIN if compact else PIP_W_NORMAL
         h = PIP_H_MIN if compact else PIP_H_NORMAL
         self.setFixedSize(w, h)
+        self.setGraphicsEffect(None)
 
     @property
     def active(self) -> bool:

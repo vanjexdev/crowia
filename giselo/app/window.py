@@ -136,6 +136,8 @@ class MainWindow(QMainWindow):
         core_container.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self._giselo_core = GiseloCore(core_container)
         self._giselo_core.setGeometry(0, 0, 600, 400)
+        from PyQt6.QtGui import QColor as _QColor
+        self._giselo_core.set_accent(_QColor(state.accent))
 
         self._camera_pip = CameraPip(core_container)
         self._camera_pip.closed.connect(self._on_pip_closed)
@@ -262,6 +264,8 @@ class MainWindow(QMainWindow):
     def _on_accent(self, color: str) -> None:
         state.accent = color
         self.setStyleSheet(build_qss(color))
+        from PyQt6.QtGui import QColor
+        self._giselo_core.set_accent(QColor(color))
         try:
             from ruamel.yaml import YAML
             import io, pathlib
@@ -286,25 +290,33 @@ class MainWindow(QMainWindow):
         mem_svc.set_active(name)
         self._tab_dock.set_active(name)
         self._status_bar.set_instance(name)
-        self._svc.switch_backend(name)
-        notif.push(f"Instancia: {name}", "info")
+        backend = state.INSTANCE_BACKENDS.get(name, "claude")
+        self._svc.switch_backend(backend)
+        notif.push(f"Instancia: {name} ({backend})", "info")
         self._refresh_drawer_if_open("config")
 
     def _on_add_instance(self) -> None:
         from PyQt6.QtWidgets import QInputDialog
         name, ok = QInputDialog.getText(
             self, "Nueva instancia", "Nombre:",
-            text=f"claude-{len(state.INSTANCES)+1}"
+            text=f"claude-{len(state.INSTANCES) + 1}"
         )
         if not ok or not name.strip():
             return
         name = name.strip()
         if name in state.INSTANCES:
             return
+        backend, ok2 = QInputDialog.getItem(
+            self, "Backend", f"Backend para '{name}':",
+            ["claude", "codex", "opencode"], 0, False
+        )
+        if not ok2:
+            return
         state.INSTANCES = list(state.INSTANCES) + [name]
+        state.INSTANCE_BACKENDS[name] = backend
         self._tab_dock.add_instance(name)
         self.switch_instance(name)
-        notif.push(f"Instancia '{name}' creada", "ok")
+        notif.push(f"Instancia '{name}' ({backend}) creada", "ok")
 
     def toggle_drawer(self, name: str) -> None:
         if state.active_drawer == name and self._drawer.is_open():
@@ -430,6 +442,8 @@ class MainWindow(QMainWindow):
         state.camera_active = False
         self._status_bar.set_camera(False)
         notif.push("Cámara desactivada", "warn")
+        container = self._giselo_core.parent()
+        self._giselo_core.setGeometry(0, 0, container.width(), container.height())
 
     def _refresh_drawer_if_open(self, name: str) -> None:
         if state.active_drawer != name or not self._drawer.is_open():
@@ -448,18 +462,27 @@ class MainWindow(QMainWindow):
 
     def _on_core_container_resize(self, event) -> None:
         QWidget.resizeEvent(self._giselo_core.parent(), event)
-        self._giselo_core.setGeometry(0, 0, event.size().width(), event.size().height())
-        self._reposition_pip()
+        cw, ch = event.size().width(), event.size().height()
+        if self._camera_pip.active:
+            pip_w = int(cw * 0.80)
+            self._camera_pip.expand(pip_w, ch, state.accent)
+            self._camera_pip.setGeometry(0, 0, pip_w, ch)
+            self._camera_pip.raise_()
+            self._giselo_core.setGeometry(pip_w, 0, cw - pip_w, ch)
+        else:
+            self._giselo_core.setGeometry(0, 0, cw, ch)
 
     def _reposition_pip(self) -> None:
         if not self._camera_pip.active:
             return
-        cw = self._giselo_core.width()
-        pip_w = self._camera_pip.width()
-        pip_h = self._camera_pip.height()
-        x = (cw - pip_w) // 2
-        self._camera_pip.move(x, 12)
+        container = self._giselo_core.parent()
+        cw = container.width()
+        ch = container.height()
+        pip_w = int(cw * 0.80)
+        self._camera_pip.expand(pip_w, ch, state.accent)
+        self._camera_pip.setGeometry(0, 0, pip_w, ch)
         self._camera_pip.raise_()
+        self._giselo_core.setGeometry(pip_w, 0, cw - pip_w, ch)
 
     def _on_busy_changed(self, busy: bool) -> None:
         self._input_bar.setEnabled(not busy)

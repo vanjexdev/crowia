@@ -146,12 +146,13 @@ def build(layout: QVBoxLayout) -> None:
     # ── Backend (instancia activa) ────────────────────────────────────────────
     from giselo.app.state import state
     instance = state.active_instance
+    backend  = state.INSTANCE_BACKENDS.get(instance, instance)
 
-    _section_title(layout, f"Instancia: {instance}")
+    _section_title(layout, f"Instancia: {instance} ({backend})")
 
     backend_widgets: dict = {}
 
-    if instance == "claude":
+    if backend == "claude":
         cl_model = _combo(
             ["claude-haiku-4-5", "claude-sonnet-4-6", "claude-opus-4-7",
              "claude-haiku-3-5", "claude-sonnet-3-7"],
@@ -160,7 +161,7 @@ def build(layout: QVBoxLayout) -> None:
         _add_row(layout, "modelo", cl_model)
         backend_widgets["cl_model"] = cl_model
 
-    elif instance == "codex":
+    elif backend == "codex":
         cx_model   = _lineedit(cfg["codex"].get("model") or "")
         cx_model.setPlaceholderText("dejar vacío = default")
         cx_sandbox = _combo(
@@ -175,7 +176,7 @@ def build(layout: QVBoxLayout) -> None:
         backend_widgets.update(cx_model=cx_model, cx_sandbox=cx_sandbox,
                                cx_workdir=cx_workdir)
 
-    elif instance == "opencode":
+    elif backend == "opencode":
         oc_model = _lineedit(cfg["opencode"].get("model", ""))
         _add_row(layout, "modelo", oc_model)
         backend_widgets["oc_model"] = oc_model
@@ -223,13 +224,13 @@ def build(layout: QVBoxLayout) -> None:
             cfg["history"]["enabled"]     = hist_enabled.isChecked()
             cfg["history"]["max_turns"]   = hist_turns.value()
 
-            if instance == "claude" and "cl_model" in backend_widgets:
+            if backend == "claude" and "cl_model" in backend_widgets:
                 cfg["claude"]["model"] = backend_widgets["cl_model"].currentText()
-            elif instance == "codex":
+            elif backend == "codex":
                 cfg["codex"]["model"]       = backend_widgets["cx_model"].text().strip()
                 cfg["codex"]["sandbox"]     = backend_widgets["cx_sandbox"].currentText()
                 cfg["codex"]["working_dir"] = backend_widgets["cx_workdir"].text().strip()
-            elif instance == "opencode":
+            elif backend == "opencode":
                 cfg["opencode"]["model"] = backend_widgets["oc_model"].text().strip()
 
             _save(cfg)
