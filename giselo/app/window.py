@@ -16,6 +16,7 @@ from giselo.widgets.chat_preview import ChatPreview
 from giselo.widgets.input_bar    import InputBar
 from giselo.widgets.status_bar   import StatusBar
 from giselo.widgets.camera_pip   import CameraPip
+from giselo.widgets.palette_popup import PalettePopup
 
 from giselo.panels import memoria, historial, sistema, cola, notif, tokens, config_panel
 
@@ -44,6 +45,8 @@ class MainWindow(QMainWindow):
         self._fullscreen = False
         self._drawers: dict[str, Drawer] = {}
         self._response_buf = ""
+        self._palette = PalettePopup(self)
+        self._palette.accent_selected.connect(self._on_accent)
         self._build_ui()
         self._connect_signals()
         self._apply_breakpoint(self.width())
@@ -242,7 +245,13 @@ class MainWindow(QMainWindow):
         notif.push(f"Cámara [{index}] activada", "info")
 
     def open_palette(self) -> None:
-        pass  # Phase E
+        center = self.geometry().center()
+        from PyQt6.QtCore import QPoint
+        self._palette.show_at(QPoint(center.x(), center.y()))
+
+    def _on_accent(self, color: str) -> None:
+        state.accent = color
+        self.setStyleSheet(build_qss(color))
 
     def close_drawer(self) -> None:
         if self._drawer.is_open():
