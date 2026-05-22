@@ -53,6 +53,15 @@ class MainWindow(QMainWindow):
         self._svc.response_error.connect(self._on_response_error)
         self._svc.busy_changed.connect(self._on_busy_changed)
 
+        from crowia.config import load as load_cfg
+        from giselo.services.voice import VoiceService
+        self._voice = VoiceService(load_cfg(), self)
+        self._voice.started.connect(self._on_voice_started)
+        self._voice.stopped_recording.connect(self._on_voice_stopped)
+        self._voice.transcribed.connect(self._on_voice_transcribed)
+        self._voice.error.connect(self._on_voice_error)
+        self._voice.level_changed.connect(self._on_voice_level)
+
         from giselo.app import shortcuts
         shortcuts.register(self)
 
@@ -181,8 +190,10 @@ class MainWindow(QMainWindow):
         self._input_bar._on_submit()
 
     def toggle_voice(self) -> None:
-        state.voice_active = not state.voice_active
-        self._status_bar.set_voice(state.voice_active)
+        if self._voice.recording:
+            self._voice.stop_recording()
+        else:
+            self._voice.start_recording()
 
     def toggle_camera(self) -> None:
         if self._camera_pip.active:
@@ -261,6 +272,36 @@ class MainWindow(QMainWindow):
         self._drawer.open_drawer()
         if name == "historial":
             self._drawer.scroll_to_bottom()
+
+    # ── Voice slots ───────────────────────────────────────────────────────────
+
+    def _on_voice_started(self) -> None:
+        state.voice_active = True
+        self._status_bar.set_voice(True)
+        self._giselo_core.set_pill_text("● GRABANDO · LVL 0%")
+        notif.push("Grabación iniciada", "info")
+
+    def _on_voice_stopped(self) -> None:
+        self._giselo_core.set_pill_text("● PROCESANDO VOZ...")
+
+    def _on_voice_transcribed(self, text: str) -> None:
+        state.voice_active = False
+        self._status_bar.set_voice(False)
+        notif.push(f"Voz: {text[:40]}", "ok")
+        self._on_message(text)
+
+    def _on_voice_error(self, msg: str) -> None:
+        state.voice_active = False
+        self._status_bar.set_voice(False)
+        self._giselo_core.set_state("error")
+        self._giselo_core.set_pill_text("● ERROR VOZ")
+        notif.push(f"Voz error: {msg}", "error")
+        from PyQt6.QtCore import QTimer
+        QTimer.singleShot(2000, lambda: self._giselo_core.set_pill_text("● ESCUCHANDO · LVL 0%"))
+
+    def _on_voice_level(self, level: int) -> None:
+        if self._voice.recording:
+            self._giselo_core.set_pill_text(f"● GRABANDO · LVL {level}%")
 
     # ── Internal slots ────────────────────────────────────────────────────────
 
