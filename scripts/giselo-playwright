@@ -47,10 +47,11 @@ import subprocess
 import sys
 import time
 
-SOCKET_PATH = pathlib.Path("/tmp/crowia/playwright.sock")
-PID_FILE    = pathlib.Path("/tmp/crowia/playwright.pid")
-LOG_FILE    = pathlib.Path("/tmp/crowia/playwright.log")
-DAEMON      = pathlib.Path(__file__).parent / "giselo-browser-daemon"
+SOCKET_PATH     = pathlib.Path("/tmp/crowia/playwright.sock")
+PID_FILE        = pathlib.Path("/tmp/crowia/playwright.pid")
+LOG_FILE        = pathlib.Path("/tmp/crowia/playwright.log")
+TYPE_FILE       = pathlib.Path("/tmp/crowia/playwright_type.txt")
+DAEMON          = pathlib.Path(__file__).parent / "giselo-browser-daemon"
 SCREENSHOT_DEFAULT = "/tmp/crowia/playwright_screenshot.png"
 
 
@@ -68,20 +69,16 @@ def is_running() -> bool:
 
 
 def kill_stale() -> None:
+    """Kill only THIS daemon instance via PID file — not the Firefox daemon."""
     try:
-        result = subprocess.run(
-            ["pgrep", "-f", f"giselo-browser-daemon.*playwright"],
-            capture_output=True, text=True,
-        )
-        for pid in result.stdout.strip().split():
-            try:
-                os.kill(int(pid), 15)
-            except ProcessLookupError:
-                pass
-        time.sleep(0.4)
-    except Exception:
+        if PID_FILE.exists():
+            pid = int(PID_FILE.read_text().strip())
+            os.kill(pid, 15)
+            time.sleep(0.4)
+    except (ProcessLookupError, ValueError, OSError):
         pass
     SOCKET_PATH.unlink(missing_ok=True)
+    PID_FILE.unlink(missing_ok=True)
 
 
 def start_daemon(headless: bool = False) -> None:
@@ -97,10 +94,11 @@ def start_daemon(headless: bool = False) -> None:
     pathlib.Path("/tmp/crowia").mkdir(parents=True, exist_ok=True)
     cmd = [
         str(DAEMON),
-        "--browser", "chromium",
-        "--socket",  str(SOCKET_PATH),
-        "--pid",     str(PID_FILE),
-        "--log",     str(LOG_FILE),
+        "--browser",    "chromium",
+        "--socket",     str(SOCKET_PATH),
+        "--pid",        str(PID_FILE),
+        "--log",        str(LOG_FILE),
+        "--type-file",  str(TYPE_FILE),
     ]
     if headless:
         cmd.append("--headless")

@@ -77,20 +77,16 @@ def is_running() -> bool:
 
 
 def kill_stale():
-    """Kill any lingering daemon processes and clean up socket."""
+    """Kill only THIS daemon instance via PID file — not the playwright daemon."""
     try:
-        result = subprocess.run(
-            ["pgrep", "-f", "giselo-browser-daemon"], capture_output=True, text=True
-        )
-        for pid in result.stdout.strip().split():
-            try:
-                os.kill(int(pid), 15)  # SIGTERM
-            except ProcessLookupError:
-                pass
-        time.sleep(0.5)
-    except Exception:
+        if PID_FILE.exists():
+            pid = int(PID_FILE.read_text().strip())
+            os.kill(pid, 15)
+            time.sleep(0.5)
+    except (ProcessLookupError, ValueError, OSError):
         pass
     SOCKET_PATH.unlink(missing_ok=True)
+    PID_FILE.unlink(missing_ok=True)
 
 
 BROWSER_TYPE_FILE = pathlib.Path("/tmp/crowia/browser_type.txt")
@@ -105,7 +101,6 @@ def running_browser_type() -> str:
 
 def start_daemon():
     if is_running():
-        # If browser type changed, force restart
         if running_browser_type() == BROWSER_TYPE:
             return
         kill_stale()
@@ -121,7 +116,8 @@ def start_daemon():
     pathlib.Path("/tmp/crowia").mkdir(parents=True, exist_ok=True)
     log_f = open(LOG_FILE, "a")
     subprocess.Popen(
-        [str(DAEMON), "--browser", BROWSER_TYPE],
+        [str(DAEMON), "--browser", BROWSER_TYPE,
+         "--type-file", str(BROWSER_TYPE_FILE)],
         start_new_session=True,
         stdout=log_f,
         stderr=log_f,
