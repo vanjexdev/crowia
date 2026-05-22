@@ -42,7 +42,7 @@ class TabDock(QWidget):
     def _make_tab(self, name: str) -> QPushButton:
         meta = INSTANCE_META.get(name, {"color": MUTE, "shortcut": ""})
         dot  = "●"
-        btn  = QPushButton(f"{dot} {name}  {meta['shortcut']}")
+        btn  = QPushButton(f"{dot} {name}")
         btn.setProperty("tabButton", True)
         btn.setFixedHeight(44)
         btn.setCursor(__import__("PyQt6.QtCore", fromlist=["Qt"]).Qt.CursorShape.PointingHandCursor)

@@ -2,9 +2,29 @@ from PyQt6.QtWidgets import QWidget, QLabel, QPushButton, QVBoxLayout, QSizePoli
 from PyQt6.QtMultimedia import QCamera, QMediaCaptureSession, QMediaDevices
 from PyQt6.QtMultimediaWidgets import QVideoWidget
 from PyQt6.QtCore import Qt, QPropertyAnimation, QEasingCurve, pyqtSignal, QSize
-from PyQt6.QtGui import QColor
+from PyQt6.QtGui import QColor, QPainter, QRadialGradient
 
 from giselo.app.theme import LIME, BG, INK
+
+
+class _Vignette(QWidget):
+    """Transparent overlay with radial gradient — dark edges, clear center."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+
+    def paintEvent(self, event) -> None:
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        w, h = self.width(), self.height()
+        cx, cy = w / 2.0, h / 2.0
+        grad = QRadialGradient(cx, cy, max(w, h) * 0.55)
+        grad.setColorAt(0.45, QColor(10, 16, 32, 0))
+        grad.setColorAt(0.78, QColor(10, 16, 32, 90))
+        grad.setColorAt(1.00, QColor(10, 16, 32, 230))
+        p.fillRect(self.rect(), grad)
+        p.end()
 
 PIP_W_NORMAL = 220
 PIP_H_NORMAL = 135
@@ -74,6 +94,10 @@ class CameraPip(QWidget):
             border-radius: 3px;
         """)
 
+        # Vignette overlay (circular feathered edge)
+        self._vignette = _Vignette(self)
+        self._vignette.hide()
+
         # Close button — top-right
         self._close_btn = QPushButton("×", self)
         self._close_btn.setFixedSize(18, 18)
@@ -94,11 +118,12 @@ class CameraPip(QWidget):
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         w, h = self.width(), self.height()
-        # Reposition overlay widgets
         self._close_btn.move(w - 22, 4)
         self._res_badge.adjustSize()
         self._res_badge.move(w - self._res_badge.width() - 6,
                               h - self._res_badge.height() - 6)
+        self._vignette.setGeometry(0, 0, w, h)
+        self._vignette.raise_()
 
     # ── Public API ────────────────────────────────────────────────────────────
 
@@ -133,6 +158,8 @@ class CameraPip(QWidget):
         if not self._active:
             return
         self._active = False
+        self._vignette.hide()
+        self.setGraphicsEffect(None)
         if self._camera:
             self._camera.stop()
             self._camera = None
@@ -144,12 +171,10 @@ class CameraPip(QWidget):
         self.setMinimumSize(0, 0)
         self.setMaximumSize(16777215, 16777215)
         self.resize(w, h)
-        from PyQt6.QtWidgets import QGraphicsDropShadowEffect
-        glow = QGraphicsDropShadowEffect(self)
-        glow.setBlurRadius(48)
-        glow.setColor(QColor(accent))
-        glow.setOffset(0, 0)
-        self.setGraphicsEffect(glow)
+        self.setGraphicsEffect(None)
+        self._vignette.setGeometry(0, 0, w, h)
+        self._vignette.show()
+        self._vignette.raise_()
 
     def set_compact(self, compact: bool) -> None:
         if not self._active:

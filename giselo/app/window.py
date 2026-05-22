@@ -443,7 +443,8 @@ class MainWindow(QMainWindow):
         self._status_bar.set_camera(False)
         notif.push("Cámara desactivada", "warn")
         container = self._giselo_core.parent()
-        self._giselo_core.setGeometry(0, 0, container.width(), container.height())
+        cw, ch = container.width(), container.height()
+        self._giselo_core.setGeometry(0, 0, cw, ch)
 
     def _refresh_drawer_if_open(self, name: str) -> None:
         if state.active_drawer != name or not self._drawer.is_open():
@@ -463,14 +464,8 @@ class MainWindow(QMainWindow):
     def _on_core_container_resize(self, event) -> None:
         QWidget.resizeEvent(self._giselo_core.parent(), event)
         cw, ch = event.size().width(), event.size().height()
-        if self._camera_pip.active:
-            pip_w = int(cw * 0.80)
-            self._camera_pip.expand(pip_w, ch, state.accent)
-            self._camera_pip.setGeometry(0, 0, pip_w, ch)
-            self._camera_pip.raise_()
-            self._giselo_core.setGeometry(pip_w, 0, cw - pip_w, ch)
-        else:
-            self._giselo_core.setGeometry(0, 0, cw, ch)
+        self._giselo_core.setGeometry(0, 0, cw, ch)
+        self._reposition_pip()
 
     def _reposition_pip(self) -> None:
         if not self._camera_pip.active:
@@ -478,11 +473,21 @@ class MainWindow(QMainWindow):
         container = self._giselo_core.parent()
         cw = container.width()
         ch = container.height()
-        pip_w = int(cw * 0.80)
-        self._camera_pip.expand(pip_w, ch, state.accent)
-        self._camera_pip.setGeometry(0, 0, pip_w, ch)
+        # Camera fills full container
+        self._camera_pip.expand(cw, ch, state.accent)
+        self._camera_pip.setGeometry(0, 0, cw, ch)
+        # GiseloCore sits on top as small overlay — bottom-right
+        overlay_size = max(160, min(cw, ch) // 3)
+        self._giselo_core.setGeometry(
+            cw - overlay_size - 12,
+            ch - overlay_size - 12,
+            overlay_size,
+            overlay_size,
+        )
+        self._giselo_core.raise_()
         self._camera_pip.raise_()
-        self._giselo_core.setGeometry(pip_w, 0, cw - pip_w, ch)
+        # Re-raise giselo above camera
+        self._giselo_core.raise_()
 
     def _on_busy_changed(self, busy: bool) -> None:
         self._input_bar.setEnabled(not busy)
