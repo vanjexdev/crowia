@@ -67,20 +67,36 @@ async def launch_context():
         if BROWSER_TYPE == "firefox":
             context = await pw_instance.firefox.launch_persistent_context(
                 str(PROFILE_DIR), headless=HEADLESS,
-            )
-        elif BROWSER_TYPE == "chrome":
-            context = await pw_instance.chromium.launch_persistent_context(
-                str(PROFILE_DIR), headless=HEADLESS, channel="chrome",
+                firefox_user_prefs={
+                    "dom.webdriver.enabled": False,
+                    "useAutomationExtension": False,
+                },
             )
         else:
-            import shutil
-            sys_chromium = shutil.which("chromium") or shutil.which("chromium-browser")
-            chromium_kwargs: dict = {"headless": HEADLESS}
-            if sys_chromium:
-                chromium_kwargs["executable_path"] = sys_chromium
-            context = await pw_instance.chromium.launch_persistent_context(
-                str(PROFILE_DIR), **chromium_kwargs,
-            )
+            # Try connecting to a running Chromium/Brave/Chrome with --remote-debugging-port=9222
+            try:
+                browser = await pw_instance.chromium.connect_over_cdp("http://localhost:9222")
+                ctxs = browser.contexts
+                context = ctxs[0] if ctxs else await browser.new_context()
+                pages = []
+                current_idx = 0
+                log.info("Connected to running Chromium via CDP on :9222")
+                return
+            except Exception as e:
+                log.info("CDP :9222 unavailable (%s) — launching fresh", e)
+            if BROWSER_TYPE == "chrome":
+                context = await pw_instance.chromium.launch_persistent_context(
+                    str(PROFILE_DIR), headless=HEADLESS, channel="chrome",
+                )
+            else:
+                import shutil
+                sys_chromium = shutil.which("chromium") or shutil.which("chromium-browser")
+                chromium_kwargs: dict = {"headless": HEADLESS}
+                if sys_chromium:
+                    chromium_kwargs["executable_path"] = sys_chromium
+                context = await pw_instance.chromium.launch_persistent_context(
+                    str(PROFILE_DIR), **chromium_kwargs,
+                )
         pages = []
         current_idx = 0
         log.info("%s context ready. Profile: %s", BROWSER_TYPE, PROFILE_DIR)

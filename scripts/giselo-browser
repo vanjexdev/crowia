@@ -33,9 +33,9 @@ import time
 
 SOCKET_PATH = pathlib.Path("/tmp/crowia/browser.sock")
 PID_FILE = pathlib.Path("/tmp/crowia/browser.pid")
-DAEMON = pathlib.Path(__file__).parent / "giselo-browser-daemon"
+DAEMON = pathlib.Path(__file__).resolve().parent / "giselo-browser-daemon"
 LOG_FILE = pathlib.Path("/tmp/crowia/browser.log")
-CONFIG_FILE = pathlib.Path(__file__).parent.parent / "config.yaml"
+CONFIG_FILE = pathlib.Path(__file__).resolve().parent.parent / "config.yaml"
 
 
 # Read browser type from config.yaml (default: chromium)
@@ -114,6 +114,10 @@ def start_daemon():
     env.setdefault("DBUS_SESSION_BUS_ADDRESS", f"unix:path=/run/user/{uid}/bus")
     env.setdefault("MOZ_ENABLE_WAYLAND", "1")
     pathlib.Path("/tmp/crowia").mkdir(parents=True, exist_ok=True)
+    if BROWSER_TYPE == "firefox":
+        profile = pathlib.Path.home() / f".config/crowia/browser-profile/firefox"
+        for lock in ("lock", ".parentlock"):
+            (profile / lock).unlink(missing_ok=True)
     log_f = open(LOG_FILE, "a")
     subprocess.Popen(
         [str(DAEMON), "--browser", BROWSER_TYPE,

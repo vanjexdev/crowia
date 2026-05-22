@@ -1,7 +1,7 @@
 hotkey:
   keys:
-  - KEY_RIGHTCTRL
-  - KEY_GRAVE
+    - KEY_RIGHTCTRL
+    - KEY_GRAVE
   mode: toggle
   max_record_seconds: 300
 audio:
@@ -15,14 +15,15 @@ whisper:
   language: es
   device: cpu
   compute_type: int8
-  venv: ''
-  initial_prompt: Giselo, oye giselo, hey giselo, abre Firefox, abre la 
-    terminal, busca, qué es, cómo se hace, mira la pantalla, sube el volumen, 
+  venv: ""
+  initial_prompt: Giselo, oye giselo, hey giselo, abre Firefox, abre la
+    terminal, busca, qué es, cómo se hace, mira la pantalla, sube el volumen,
     baja el volumen.
 claude:
   model: claude-haiku-4-5
-  api_key: ''
-  system_prompt: 'Tu nombre es Giselo. NUNCA te identifiques como Claude, Anthropic,
+  api_key: ""
+  system_prompt:
+    'Tu nombre es Giselo. NUNCA te identifiques como Claude, Anthropic,
     ni ningún otro nombre — siempre eres Giselo. Si alguien pregunta quién eres, di
     que eres Giselo, el asistente personal del usuario. Si preguntan cómo te sientes,
     responde brevemente en primera persona como Giselo. Eres un asistente de voz conciso
@@ -57,7 +58,8 @@ claude:
     explorador gráfico y devuelve el path elegido. Para tareas de múltiples pasos
     ejecuta los comandos uno tras otro en secuencia. NUNCA digas que no tienes acceso
     al navegador.'
-  allowed_tools: WebSearch Bash(git *) Bash(zeditor*) Bash(alacritty*) Bash(giselo-ask*)
+  allowed_tools:
+    WebSearch Bash(git *) Bash(zeditor*) Bash(alacritty*) Bash(giselo-ask*)
     Bash(giselo-askpass*) Bash(giselo-pick*) Bash(giselo-browser*) Bash(giselo-playwright*)
     Bash(giselo-google*) Bash(giselo-remind*) Read Edit Write
   timeout_seconds: 300
@@ -65,16 +67,16 @@ browser:
   type: chromium
 backend: claude
 codex:
-  model: ''
+  model: ""
   sandbox: danger-full-access
-  working_dir: ''
+  working_dir: ""
 opencode:
   model: opencode-go/minimax-m2.7
 always_on:
   wake_phrases:
-  - oye giselo
-  - hey giselo
-  - giselo
+    - oye giselo
+    - hey giselo
+    - giselo
   vad_aggressiveness: 2
   silence_duration_ms: 800
   min_speech_ms: 400
@@ -89,10 +91,10 @@ output:
   response_file: /tmp/crowia/last_response.txt
   tts_enabled: true
   tts_command:
-  - piper-tts
-  - --model
-  - /home/jesusu/.local/share/piper/es_ES-davefx-medium.onnx
-  - --output_raw
+    - piper-tts
+    - --model
+    - /home/jesusu/.local/share/piper/es_ES-davefx-medium.onnx
+    - --output_raw
   response_width: 600
   response_height: 420
 server:
@@ -100,15 +102,14 @@ server:
     enabled: false
     username: vanjex
     password_hash: $2b$12$X3YBmgUL6K5E1ZClwnq7O.zVyPfwH1jl2qPt3bFSV2k1RA92Os6E6
-    token_secret: 
-      88543faa5f1086ddab3c9992b756779dad91558d8915c5ab9407b07aac27e949
+    token_secret: 88543faa5f1086ddab3c9992b756779dad91558d8915c5ab9407b07aac27e949
     token_expire_hours: 72
 skills:
   path: skills/
   enabled:
-  - cachyos-kde
-  - google
-  - remind
-  - browser
+    - cachyos-kde
+    - google
+    - remind
+    - browser
 ui:
-  accent: '#88c93a'
+  accent: "#88c93a"

@@ -51,7 +51,7 @@ SOCKET_PATH     = pathlib.Path("/tmp/crowia/playwright.sock")
 PID_FILE        = pathlib.Path("/tmp/crowia/playwright.pid")
 LOG_FILE        = pathlib.Path("/tmp/crowia/playwright.log")
 TYPE_FILE       = pathlib.Path("/tmp/crowia/playwright_type.txt")
-DAEMON          = pathlib.Path(__file__).parent / "giselo-browser-daemon"
+DAEMON          = pathlib.Path(__file__).resolve().parent / "giselo-browser-daemon"
 SCREENSHOT_DEFAULT = "/tmp/crowia/playwright_screenshot.png"
 
 
