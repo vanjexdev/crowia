@@ -186,12 +186,38 @@ class MainWindow(QMainWindow):
     def toggle_camera(self) -> None:
         if self._camera_pip.active:
             self._camera_pip.stop()
+            return
+
+        from PyQt6.QtMultimedia import QMediaDevices
+        cameras = QMediaDevices.videoInputs()
+        if not cameras:
+            return
+
+        if len(cameras) == 1:
+            self._start_camera(0)
         else:
-            compact = state.breakpoint == "MIN"
-            self._camera_pip.start(compact)
-            state.camera_active = True
-            self._status_bar.set_camera(True)
-            self._reposition_pip()
+            from PyQt6.QtWidgets import QMenu
+            from PyQt6.QtGui import QCursor
+            menu = QMenu(self)
+            menu.setStyleSheet(f"""
+                QMenu {{ background: #0f1a2e; color: #cfd6e6; border: 1px solid #cfd6e6;
+                         font-family: 'JetBrains Mono', monospace; font-size: 11px; }}
+                QMenu::item {{ padding: 5px 16px; }}
+                QMenu::item:selected {{ background: rgba(136,201,58,0.15); color: #88c93a; }}
+            """)
+            for i, cam in enumerate(cameras):
+                action = menu.addAction(f"[{i}] {cam.description()}")
+                action.setData(i)
+            chosen = menu.exec(QCursor.pos())
+            if chosen:
+                self._start_camera(chosen.data())
+
+    def _start_camera(self, index: int) -> None:
+        compact = state.breakpoint == "MIN"
+        self._camera_pip.start(compact, cam_index=index)
+        state.camera_active = True
+        self._status_bar.set_camera(True)
+        self._reposition_pip()
 
     def open_palette(self) -> None:
         pass  # Phase E

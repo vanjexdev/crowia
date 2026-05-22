@@ -102,7 +102,7 @@ class CameraPip(QWidget):
 
     # ── Public API ────────────────────────────────────────────────────────────
 
-    def start(self, compact: bool = False) -> None:
+    def start(self, compact: bool = False, cam_index: int = 0) -> None:
         if self._active:
             return
 
@@ -110,8 +110,9 @@ class CameraPip(QWidget):
         if not cameras:
             return
 
-        cam_info = cameras[0]
-        res_text = f"cam-0 · {cam_info.description()[:12]}"
+        idx      = min(cam_index, len(cameras) - 1)
+        cam_info = cameras[idx]
+        res_text = f"cam-{idx} · {cam_info.description()[:14]}"
         self._res_badge.setText(res_text)
 
         self._camera  = QCamera(cam_info)
