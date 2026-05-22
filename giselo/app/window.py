@@ -260,9 +260,12 @@ class MainWindow(QMainWindow):
             state.active_drawer = None
 
     def switch_instance(self, name: str) -> None:
+        from giselo.services import memory as mem_svc
         state.active_instance = name
+        mem_svc.set_active(name)
         self._tab_dock.set_active(name)
         self._status_bar.set_instance(name)
+        self._svc.switch_backend(name)
         notif.push(f"Instancia: {name}", "info")
 
     def toggle_drawer(self, name: str) -> None:
@@ -377,7 +380,13 @@ class MainWindow(QMainWindow):
         self._giselo_core.set_state("error")
         self._giselo_core.set_pill_text("● ERROR")
         self._chat_preview.update_giselo(f"Error: {msg}", "--:--")
+        self._input_bar.setEnabled(True)
         notif.push(f"Error: {msg}", "error")
+        from PyQt6.QtCore import QTimer
+        QTimer.singleShot(2000, lambda: (
+            self._giselo_core.set_state("idle"),
+            self._giselo_core.set_pill_text("● ESCUCHANDO · LVL 0%"),
+        ))
 
     def _on_pip_closed(self) -> None:
         state.camera_active = False

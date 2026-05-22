@@ -1,5 +1,5 @@
 import pathlib
-import yaml
+from ruamel.yaml import YAML
 from PyQt6.QtWidgets import (QLabel, QVBoxLayout, QHBoxLayout, QComboBox,
                               QCheckBox, QLineEdit, QPushButton, QFrame,
                               QWidget, QSpinBox)
@@ -7,18 +7,19 @@ from PyQt6.QtCore import Qt
 from giselo.app.theme import LIME, CYAN, ORANGE, MUTE, INK, RED, CHROME
 
 CONFIG_PATH = pathlib.Path(__file__).parents[2] / "config.yaml"
+_yaml = YAML()
+_yaml.preserve_quotes = True
 
 
 def _load() -> dict:
-    return yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8"))
+    return _yaml.load(CONFIG_PATH.read_text(encoding="utf-8"))
 
 
-def _save(cfg: dict) -> None:
-    CONFIG_PATH.write_text(
-        yaml.dump(cfg, allow_unicode=True, default_flow_style=False,
-                  sort_keys=False),
-        encoding="utf-8",
-    )
+def _save(cfg) -> None:
+    import io
+    buf = io.StringIO()
+    _yaml.dump(cfg, buf)
+    CONFIG_PATH.write_text(buf.getvalue(), encoding="utf-8")
 
 
 def _section_title(layout: QVBoxLayout, text: str) -> None:
