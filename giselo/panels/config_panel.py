@@ -143,17 +143,42 @@ def build(layout: QVBoxLayout) -> None:
 
     _sep(layout)
 
-    # ── Backend ───────────────────────────────────────────────────────────────
-    _section_title(layout, "Backend")
-    bk_backend = _combo(["claude","codex","opencode"],
-                        cfg.get("backend","claude"))
-    cl_model   = _combo(
-        ["claude-haiku-4-5","claude-sonnet-4-6","claude-opus-4-7",
-         "claude-haiku-3-5","claude-sonnet-3-7"],
-        cfg["claude"].get("model","claude-haiku-4-5"),
-    )
-    _add_row(layout, "backend",   bk_backend)
-    _add_row(layout, "claude model", cl_model)
+    # ── Backend (instancia activa) ────────────────────────────────────────────
+    from giselo.app.state import state
+    instance = state.active_instance
+
+    _section_title(layout, f"Instancia: {instance}")
+
+    backend_widgets: dict = {}
+
+    if instance == "claude":
+        cl_model = _combo(
+            ["claude-haiku-4-5", "claude-sonnet-4-6", "claude-opus-4-7",
+             "claude-haiku-3-5", "claude-sonnet-3-7"],
+            cfg["claude"].get("model", "claude-haiku-4-5"),
+        )
+        _add_row(layout, "modelo", cl_model)
+        backend_widgets["cl_model"] = cl_model
+
+    elif instance == "codex":
+        cx_model   = _lineedit(cfg["codex"].get("model") or "")
+        cx_model.setPlaceholderText("dejar vacío = default")
+        cx_sandbox = _combo(
+            ["read-only", "workspace-write", "danger-full-access"],
+            cfg["codex"].get("sandbox", "danger-full-access"),
+        )
+        cx_workdir = _lineedit(cfg["codex"].get("working_dir") or "")
+        cx_workdir.setPlaceholderText("vacío = dir del archivo")
+        _add_row(layout, "modelo",    cx_model)
+        _add_row(layout, "sandbox",   cx_sandbox)
+        _add_row(layout, "work dir",  cx_workdir)
+        backend_widgets.update(cx_model=cx_model, cx_sandbox=cx_sandbox,
+                               cx_workdir=cx_workdir)
+
+    elif instance == "opencode":
+        oc_model = _lineedit(cfg["opencode"].get("model", ""))
+        _add_row(layout, "modelo", oc_model)
+        backend_widgets["oc_model"] = oc_model
 
     _sep(layout)
 
@@ -191,14 +216,22 @@ def build(layout: QVBoxLayout) -> None:
 
     def _on_save():
         try:
-            cfg["output"]["tts_enabled"]       = tts_toggle.isChecked()
-            cfg["whisper"]["model"]            = wh_model.currentText()
-            cfg["whisper"]["language"]         = wh_lang.text().strip() or None
-            cfg["whisper"]["device"]           = wh_device.currentText()
-            cfg["backend"]                     = bk_backend.currentText()
-            cfg["claude"]["model"]             = cl_model.currentText()
-            cfg["history"]["enabled"]          = hist_enabled.isChecked()
-            cfg["history"]["max_turns"]        = hist_turns.value()
+            cfg["output"]["tts_enabled"]  = tts_toggle.isChecked()
+            cfg["whisper"]["model"]       = wh_model.currentText()
+            cfg["whisper"]["language"]    = wh_lang.text().strip() or None
+            cfg["whisper"]["device"]      = wh_device.currentText()
+            cfg["history"]["enabled"]     = hist_enabled.isChecked()
+            cfg["history"]["max_turns"]   = hist_turns.value()
+
+            if instance == "claude" and "cl_model" in backend_widgets:
+                cfg["claude"]["model"] = backend_widgets["cl_model"].currentText()
+            elif instance == "codex":
+                cfg["codex"]["model"]       = backend_widgets["cx_model"].text().strip()
+                cfg["codex"]["sandbox"]     = backend_widgets["cx_sandbox"].currentText()
+                cfg["codex"]["working_dir"] = backend_widgets["cx_workdir"].text().strip()
+            elif instance == "opencode":
+                cfg["opencode"]["model"] = backend_widgets["oc_model"].text().strip()
+
             _save(cfg)
             status_lbl.setStyleSheet(f"color: {LIME}; font-size: 10px; font-family: 'JetBrains Mono', monospace;")
             status_lbl.setText("✓ guardado")
