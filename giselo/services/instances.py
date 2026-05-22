@@ -59,6 +59,12 @@ class InstanceService(QObject):
         self._thread: QThread | None  = None
         self._worker: _AskWorker | None = None
         self._busy = False
+        # Inject initial backend name into system prompt
+        _initial = self._cfg.get("backend", "claude")
+        self._assistant.system_prompt = (
+            f"[Instancia activa: Giselo ({_initial})]\n"
+            f"{self._assistant._base_prompt}"
+        )
 
     # ── Public ────────────────────────────────────────────────────────────────
 
@@ -71,7 +77,12 @@ class InstanceService(QObject):
         return self._assistant.current_backend_name
 
     def switch_backend(self, name: str) -> str:
-        return self._assistant.switch_backend(name)
+        result = self._assistant.switch_backend(name)
+        base = self._assistant._base_prompt
+        self._assistant.system_prompt = (
+            f"[Instancia activa: Giselo ({name})]\n{base}"
+        )
+        return result
 
     def ask(self, text: str) -> None:
         if self._busy:
