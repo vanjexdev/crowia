@@ -274,6 +274,18 @@ QPushButton[inputBtnVoz="true"] {{
     font-size: 10px;
     font-family: 'JetBrains Mono', monospace;
 }}
+QPushButton[inputBtnAlways="true"] {{
+    color: {ORANGE};
+    border: 1px solid {ORANGE};
+    background: transparent;
+    border-radius: 4px;
+    padding: 3px 8px;
+    font-size: 10px;
+    font-family: 'JetBrains Mono', monospace;
+}}
+QPushButton[inputBtnAlways="true"][alwaysActive="true"] {{
+    background: rgba(224,122,58,0.20);
+}}
 
 /* ── Status bar ── */
 #status-bar {{

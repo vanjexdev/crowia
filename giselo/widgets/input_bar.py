@@ -7,9 +7,10 @@ from giselo.app.theme import MUTE
 
 
 class InputBar(QWidget):
-    message_submitted = pyqtSignal(str)
-    camera_toggled    = pyqtSignal()
-    voice_toggled     = pyqtSignal()
+    message_submitted  = pyqtSignal(str)
+    camera_toggled     = pyqtSignal()
+    voice_toggled      = pyqtSignal()
+    always_on_toggled  = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -43,6 +44,13 @@ class InputBar(QWidget):
 
         ctrl.addStretch()
 
+        self._btn_always = QPushButton("◎ siempre")
+        self._btn_always.setProperty("inputBtnAlways", True)
+        self._btn_always.setProperty("alwaysActive", False)
+        self._btn_always.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._btn_always.clicked.connect(self.always_on_toggled)
+        ctrl.addWidget(self._btn_always)
+
         self._btn_cam = QPushButton("◐ cam")
         self._btn_cam.setProperty("inputBtnCam", True)
         self._btn_cam.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -68,6 +76,12 @@ class InputBar(QWidget):
 
     def clear(self) -> None:
         self._field.clear()
+
+    def set_always_on(self, active: bool) -> None:
+        self._btn_always.setText("◉ siempre" if active else "◎ siempre")
+        self._btn_always.setProperty("alwaysActive", active)
+        self._btn_always.style().unpolish(self._btn_always)
+        self._btn_always.style().polish(self._btn_always)
 
     def _on_submit(self) -> None:
         text = self.text()

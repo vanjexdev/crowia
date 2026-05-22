@@ -56,6 +56,8 @@ class MainWindow(QMainWindow):
         self._response_buf = ""
         self._sentence_buf = ""
         self._tts_streaming = False
+        self._always_on = False
+        self._tts_active = False
         self._palette = PalettePopup(self)
         self._palette.accent_selected.connect(self._on_accent)
         self._build_ui()
@@ -74,6 +76,7 @@ class MainWindow(QMainWindow):
         from giselo.services.tts import TTSService
         self._tts = TTSService(_cfg, self)
         self._tts.started.connect(lambda: self._giselo_core.set_state("speaking"))
+        self._tts.started.connect(lambda: setattr(self, "_tts_active", True))
         self._tts.finished.connect(self._on_tts_done)
         self._tts.error.connect(lambda e: notif.push(f"TTS: {e}", "warn"))
 
@@ -174,6 +177,7 @@ class MainWindow(QMainWindow):
         self._input_bar.message_submitted.connect(self._on_message)
         self._input_bar.camera_toggled.connect(self.toggle_camera)
         self._input_bar.voice_toggled.connect(self.toggle_voice)
+        self._input_bar.always_on_toggled.connect(self.toggle_always_on)
         self._drawer.closed.connect(self._on_drawer_closed)
 
     # ── Breakpoint / responsive ───────────────────────────────────────────────
@@ -218,6 +222,23 @@ class MainWindow(QMainWindow):
             self._voice.stop_recording()
         else:
             self._voice.start_recording()
+
+    def toggle_always_on(self) -> None:
+        self._always_on = not self._always_on
+        self._input_bar.set_always_on(self._always_on)
+        if self._always_on:
+            if not self._voice.recording and not self._tts_active:
+                self._voice.start_recording()
+        else:
+            if self._voice.recording:
+                self._voice.stop_recording()
+
+    def _resume_always_on(self) -> None:
+        if not self._always_on:
+            return
+        if self._voice.recording or self._tts_active or not self._input_bar.isEnabled():
+            return
+        self._voice.start_recording()
 
     def toggle_camera(self) -> None:
         if self._camera_pip.active:
@@ -347,8 +368,10 @@ class MainWindow(QMainWindow):
     # ── TTS slots ─────────────────────────────────────────────────────────────
 
     def _on_tts_done(self) -> None:
+        self._tts_active = False
         self._giselo_core.set_state("idle")
         self._giselo_core.set_pill_text("● ESCUCHANDO · LVL 0%")
+        self._resume_always_on()
 
     # ── Voice slots ───────────────────────────────────────────────────────────
 
@@ -377,7 +400,10 @@ class MainWindow(QMainWindow):
         self._giselo_core.set_pill_text("● ERROR VOZ")
         notif.push(f"Voz error: {msg}", "error")
         from PyQt6.QtCore import QTimer
-        QTimer.singleShot(2000, lambda: self._giselo_core.set_pill_text("● ESCUCHANDO · LVL 0%"))
+        QTimer.singleShot(2000, lambda: (
+            self._giselo_core.set_pill_text("● ESCUCHANDO · LVL 0%"),
+            self._resume_always_on(),
+        ))
 
     def _on_voice_level(self, level: int) -> None:
         if self._voice.recording:
@@ -450,14 +476,17 @@ class MainWindow(QMainWindow):
                 self._tts_streaming = True
             else:
                 self._tts.stream_sentence(remaining)
+        tts_was_streaming = self._tts_streaming
         if self._tts_streaming:
             self._tts.end_stream()
-        elif not remaining:
-            # No TTS started at all (TTS disabled or empty response)
-            pass
         self._tts_streaming = False
+        # Always-on: if no TTS session active, resume listening now
+        if self._always_on and not tts_was_streaming and not self._tts_active:
+            from PyQt6.QtCore import QTimer
+            QTimer.singleShot(600, self._resume_always_on)
 
     def _on_response_error(self, msg: str) -> None:
+        self._tts_active = False
         self._giselo_core.set_state("error")
         self._giselo_core.set_pill_text("● ERROR")
         self._chat_preview.update_giselo(f"Error: {msg}", "--:--")
@@ -467,6 +496,7 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(2000, lambda: (
             self._giselo_core.set_state("idle"),
             self._giselo_core.set_pill_text("● ESCUCHANDO · LVL 0%"),
+            self._resume_always_on(),
         ))
 
     def _on_pip_closed(self) -> None:
