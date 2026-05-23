@@ -1,9 +1,9 @@
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-                              QSizePolicy, QApplication, QFrame)
+                              QSizePolicy, QApplication, QFrame, QPushButton)
 from PyQt6.QtCore import Qt, QSize
 from PyQt6.QtGui import QColor
 
-from giselo.app.theme import build_qss, LIME, CYAN, ORANGE, MUTE
+from giselo.app.theme import build_qss, LIME, CYAN, ORANGE, MUTE, RED
 from giselo.app.state import state
 from giselo.services.instances import InstanceService
 from giselo.widgets.title_bar    import TitleBar
@@ -12,7 +12,7 @@ from giselo.widgets.rail_left    import RailLeft
 from giselo.widgets.rail_right   import RailRight
 from giselo.widgets.drawer       import Drawer
 from giselo.widgets.giselo_core  import GiseloCore
-from giselo.widgets.chat_preview import ChatPreview
+from giselo.widgets.stream_chat import StreamChatArea
 from giselo.widgets.input_bar    import InputBar
 from giselo.widgets.status_bar   import StatusBar
 from giselo.widgets.camera_pip   import CameraPip
@@ -58,6 +58,7 @@ class MainWindow(QMainWindow):
         self._tts_streaming = False
         self._always_on = False
         self._tts_active = False
+        self._cancelling = False
         self._palette = PalettePopup(self)
         self._palette.accent_selected.connect(self._on_accent)
         self._build_ui()
@@ -150,8 +151,31 @@ class MainWindow(QMainWindow):
         self._core_container.resizeEvent = self._on_core_container_resize
         center_layout.addWidget(self._core_container, stretch=1)
 
-        self._chat_preview = ChatPreview()
-        center_layout.addWidget(self._chat_preview)
+        # Cancel bar — visible while LLM is processing
+        self._cancel_bar = QWidget()
+        self._cancel_bar.setFixedHeight(26)
+        _cb_lay = QHBoxLayout(self._cancel_bar)
+        _cb_lay.setContentsMargins(10, 2, 12, 2)
+        _cb_lay.addStretch()
+        self._cancel_btn = QPushButton("✕ cancelar")
+        self._cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._cancel_btn.setFixedHeight(20)
+        self._cancel_btn.setStyleSheet(f"""
+            QPushButton {{
+                color: {RED}; border: 1px solid {RED}; border-radius: 3px;
+                background: transparent; font-size: 9px;
+                font-family: 'JetBrains Mono', monospace; padding: 0px 8px;
+            }}
+            QPushButton:hover {{ background: rgba(230,57,70,0.15); }}
+            QPushButton:pressed {{ background: rgba(230,57,70,0.30); }}
+        """)
+        self._cancel_btn.clicked.connect(self._on_cancel)
+        _cb_lay.addWidget(self._cancel_btn)
+        self._cancel_bar.hide()
+        center_layout.addWidget(self._cancel_bar)
+
+        self._stream_chat = StreamChatArea()
+        center_layout.addWidget(self._stream_chat)
 
         self._input_bar = InputBar()
         center_layout.addWidget(self._input_bar)
@@ -197,7 +221,8 @@ class MainWindow(QMainWindow):
 
         self._rail_left.setVisible(is_compact)
         self._rail_right.setVisible(is_compact)
-        self._chat_preview.setVisible(is_compact)
+        self._stream_chat.setVisible(is_compact)
+        self._cancel_bar.setVisible(is_compact and self._svc.busy if hasattr(self, '_svc') else False)
 
         # Close drawer if we drop below MEDIUM
         if not is_medium and self._drawer.is_open():
@@ -428,7 +453,9 @@ class MainWindow(QMainWindow):
         self._response_buf = ""
         self._sentence_buf = ""
         self._tts_streaming = False
-        self._chat_preview.update_user(text, ts)
+        self._cancelling = False
+        self._stream_chat.add_user(text, ts)
+        self._stream_chat.begin_response(ts)
         self._giselo_core.set_state("thinking")
         self._giselo_core.set_pill_text("● PROCESANDO")
         self._input_bar.setEnabled(False)
@@ -436,7 +463,6 @@ class MainWindow(QMainWindow):
 
     def _on_chunk(self, chunk: str) -> None:
         from crowia.output import _split_sentences
-        from datetime import datetime
         # Support both accumulated (most backends) and delta chunk formats
         if chunk.startswith(self._response_buf):
             delta = chunk[len(self._response_buf):]
@@ -446,8 +472,7 @@ class MainWindow(QMainWindow):
             self._response_buf += chunk
         self._giselo_core.set_state("speaking")
         self._giselo_core.set_pill_text("● RESPONDIENDO")
-        ts = datetime.now().strftime("%H:%M")
-        self._chat_preview.update_giselo(self._response_buf, ts)
+        self._stream_chat.update_response(self._response_buf)
         if not delta:
             return
         self._sentence_buf += delta
@@ -462,7 +487,7 @@ class MainWindow(QMainWindow):
     def _on_response_done(self, full: str) -> None:
         from datetime import datetime
         ts = datetime.now().strftime("%H:%M")
-        self._chat_preview.update_giselo(full, ts)
+        self._stream_chat.finish_response(full, ts)
         self._giselo_core.set_state("success")
         self._giselo_core.set_pill_text("● LISTO")
         notif.push("Respuesta recibida", "ok")
@@ -487,9 +512,17 @@ class MainWindow(QMainWindow):
 
     def _on_response_error(self, msg: str) -> None:
         self._tts_active = False
+        if self._cancelling:
+            self._cancelling = False
+            self._stream_chat.error_response("cancelado")
+            self._giselo_core.set_state("idle")
+            self._giselo_core.set_pill_text("● ESCUCHANDO · LVL 0%")
+            self._input_bar.setEnabled(True)
+            self._resume_always_on()
+            return
         self._giselo_core.set_state("error")
         self._giselo_core.set_pill_text("● ERROR")
-        self._chat_preview.update_giselo(f"Error: {msg}", "--:--")
+        self._stream_chat.error_response(msg)
         self._input_bar.setEnabled(True)
         notif.push(f"Error: {msg}", "error")
         from PyQt6.QtCore import QTimer
@@ -549,8 +582,14 @@ class MainWindow(QMainWindow):
         self._camera_pip.setGeometry(pip_x, pip_y, pip_w, pip_h)
         self._camera_pip.raise_()
 
+    def _on_cancel(self) -> None:
+        self._cancelling = True
+        self._svc.cancel()
+        self._tts.stop()
+
     def _on_busy_changed(self, busy: bool) -> None:
         self._input_bar.setEnabled(not busy)
+        self._cancel_bar.setVisible(busy)
         if not busy:
             state.giselo_state = "idle"
         state.mem_tokens = len(str(self._response_buf)) // 4

@@ -105,8 +105,18 @@ class InstanceService(QObject):
         self._thread.start()
 
     def cancel(self) -> None:
-        if self._worker:
-            self._worker.cancel()
+        if not self._worker:
+            return
+        self._worker.cancel()
+        # Fallback: if subprocess exits cleanly without raising, done/error won't fire
+        from PyQt6.QtCore import QTimer
+        QTimer.singleShot(5000, self._force_cleanup)
+
+    def _force_cleanup(self) -> None:
+        if self._busy:
+            self._cleanup()
+            self.response_error.emit("cancelado")
+            self.busy_changed.emit(False)
 
     # ── Internal ──────────────────────────────────────────────────────────────
 

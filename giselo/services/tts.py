@@ -91,6 +91,18 @@ class TTSService(QObject):
         self._worker: _SpeakWorker | _StreamingTTSWorker | None = None
         self.enabled: bool = cfg["output"]["tts_enabled"]
 
+    def _playerctl_pause(self) -> None:
+        try:
+            subprocess.run(["playerctl", "pause"], capture_output=True, timeout=2)
+        except Exception:
+            pass
+
+    def _playerctl_play(self) -> None:
+        try:
+            subprocess.run(["playerctl", "play"], capture_output=True, timeout=2)
+        except Exception:
+            pass
+
     def _duck(self) -> None:
         try:
             subprocess.run([str(_SCRIPTS / "giselo-audio-duck")],
@@ -104,6 +116,7 @@ class TTSService(QObject):
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except Exception:
             pass
+        self._playerctl_play()
 
     def speak(self, text: str) -> None:
         """Blocking speak — full text at once (fallback / non-streaming path)."""
@@ -116,6 +129,7 @@ class TTSService(QObject):
         if not self.enabled or not text.strip():
             return
         self.stop()
+        self._playerctl_pause()
         self._duck()
         self._worker = _SpeakWorker(self._handler, text, self)
         self._worker.finished.connect(self.finished)
@@ -130,6 +144,7 @@ class TTSService(QObject):
         if not self.enabled or not first_sentence.strip():
             return
         self.stop()
+        self._playerctl_pause()
         self._duck()
         self._worker = _StreamingTTSWorker(self._handler, self._tts_cmd, self)
         self._worker.finished.connect(self.finished)
