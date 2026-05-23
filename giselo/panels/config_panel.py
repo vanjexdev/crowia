@@ -69,6 +69,7 @@ def _radio_h(options: list[str], current: str):
             if rb.isChecked():
                 return rb.text()
         return current
+    w.setMaximumWidth(200)
     return w, get
 
 
@@ -92,6 +93,7 @@ def _radio_v(options: list[tuple[str, str]], current_val: str):
             if rb.isChecked():
                 return val
         return current_val
+    w.setMaximumWidth(200)
     return w, get
 
 
@@ -106,6 +108,7 @@ def _lineedit(value: str) -> QLineEdit:
         }}
         QLineEdit:focus {{ border-color: {LIME}; }}
     """)
+    le.setMaximumWidth(200)
     return le
 
 
@@ -123,6 +126,7 @@ def _spinbox(value: int, min_: int, max_: int) -> QSpinBox:
         QSpinBox:focus {{ border-color: {LIME}; }}
         QSpinBox::up-button, QSpinBox::down-button {{ width: 14px; }}
     """)
+    sb.setMaximumWidth(200)
     return sb
 
 
@@ -250,6 +254,7 @@ def build(layout: QVBoxLayout) -> None:
     mic_combo = QComboBox()
     mic_combo.setStyleSheet(_combo_style)
     mic_combo.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+    mic_combo.setMaximumWidth(200)
     for display, key in mic_devices:
         mic_combo.addItem(display, userData=key)
     for i in range(mic_combo.count()):
