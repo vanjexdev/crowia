@@ -3,7 +3,7 @@ from PyQt6.QtCore import QPropertyAnimation, QEasingCurve, pyqtSignal, Qt, QSize
 from giselo.app.theme import ACCENT_DEFAULT
 
 
-DRAWER_WIDTH = 260
+DRAWER_WIDTH = 280
 
 
 class Drawer(QWidget):
@@ -44,6 +44,7 @@ class Drawer(QWidget):
         self._scroll = QScrollArea()
         self._scroll.setWidgetResizable(True)
         self._scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._content = QWidget()
         self._content_layout = QVBoxLayout(self._content)
         self._content_layout.setContentsMargins(12, 8, 12, 8)

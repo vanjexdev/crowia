@@ -334,10 +334,14 @@ def build(layout: QVBoxLayout) -> None:
     backend_widgets: dict = {}
 
     if backend == "claude":
-        cl_model_w, get_cl_model = _radio_h(
-            ["claude-haiku-4-5", "claude-sonnet-4-6", "claude-opus-4-7",
-             "claude-haiku-3-5", "claude-sonnet-3-7"],
-            cfg["claude"].get("model", "claude-haiku-4-5"),
+        _cl_current = cfg["claude"].get("model", "claude-haiku-4-5")
+        cl_model_w, get_cl_model = _radio_v(
+            [("haiku-4-5",   "claude-haiku-4-5"),
+             ("sonnet-4-6",  "claude-sonnet-4-6"),
+             ("opus-4-7",    "claude-opus-4-7"),
+             ("haiku-3-5",   "claude-haiku-3-5"),
+             ("sonnet-3-7",  "claude-sonnet-3-7")],
+            _cl_current,
         )
         _add_row(layout, "modelo", cl_model_w)
         backend_widgets["get_cl_model"] = get_cl_model
@@ -345,8 +349,10 @@ def build(layout: QVBoxLayout) -> None:
     elif backend == "codex":
         cx_model = _lineedit(cfg["codex"].get("model") or "")
         cx_model.setPlaceholderText("dejar vacio = default")
-        cx_sandbox_w, get_cx_sandbox = _radio_h(
-            ["read-only", "workspace-write", "danger-full-access"],
+        cx_sandbox_w, get_cx_sandbox = _radio_v(
+            [("read-only",          "read-only"),
+             ("workspace-write",    "workspace-write"),
+             ("danger-full-access", "danger-full-access")],
             cfg["codex"].get("sandbox", "danger-full-access"),
         )
         cx_workdir = _lineedit(cfg["codex"].get("working_dir") or "")
