@@ -52,9 +52,9 @@ def _rb_style() -> str:
 def _radio_h(options: list[str], current: str):
     """Horizontal radio group. Returns (widget, getter_fn)."""
     w = QWidget()
-    lay = QHBoxLayout(w)
+    lay = QVBoxLayout(w)
     lay.setContentsMargins(0, 0, 0, 0)
-    lay.setSpacing(12)
+    lay.setSpacing(2)
     group = QButtonGroup(w)
     buttons: list[QRadioButton] = []
     for opt in options:
@@ -64,7 +64,6 @@ def _radio_h(options: list[str], current: str):
         group.addButton(rb)
         lay.addWidget(rb)
         buttons.append(rb)
-    lay.addStretch()
     def get():
         for rb in buttons:
             if rb.isChecked():
