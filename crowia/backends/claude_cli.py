@@ -119,7 +119,7 @@ class ClaudeCliBackend(Backend):
                 # flushes events progressively, we receive them one by one.
                 import io as _io
                 _stdout = _io.TextIOWrapper(
-                    _io.BufferedReader(self._proc.stdout.raw, buffer_size=1),
+                    _io.BufferedReader(self._proc.stdout.buffer.raw, buffer_size=1),
                     encoding="utf-8", errors="replace",
                 )
                 for raw in _stdout:
