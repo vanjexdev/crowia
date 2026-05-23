@@ -268,6 +268,23 @@ def build(layout: QVBoxLayout) -> None:
 
     _sep(layout)
 
+    # ── ElevenLabs ───────────────────────────────────────────────────────────
+    _section_title(layout, "ElevenLabs TTS")
+    _el = cfg.get("elevenlabs", {})
+    el_toggle = QCheckBox("Usar ElevenLabs (reemplaza Piper)")
+    el_toggle.setChecked(_el.get("enabled", False))
+    el_toggle.setStyleSheet(
+        f"color: {INK}; font-size: 10px; font-family: 'JetBrains Mono', monospace;"
+    )
+    layout.insertWidget(layout.count() - 1, el_toggle)
+    el_apikey = _lineedit(_el.get("api_key", ""))
+    el_apikey.setEchoMode(el_apikey.EchoMode.Password)
+    el_voiceid = _lineedit(_el.get("voice_id", ""))
+    _add_row(layout, "api key", el_apikey)
+    _add_row(layout, "voice id", el_voiceid)
+
+    _sep(layout)
+
     # ── Whisper ───────────────────────────────────────────────────────────────
     _section_title(layout, "Whisper / STT")
     wh_model  = _combo(["tiny","base","small","medium","large"],
@@ -405,6 +422,13 @@ def build(layout: QVBoxLayout) -> None:
             if "skills" not in cfg:
                 cfg["skills"] = {}
             cfg["skills"]["enabled"] = [sk for sk, cb in skill_checks.items() if cb.isChecked()]
+
+            # Update ElevenLabs config
+            if "elevenlabs" not in cfg:
+                cfg["elevenlabs"] = {}
+            cfg["elevenlabs"]["enabled"]  = el_toggle.isChecked()
+            cfg["elevenlabs"]["api_key"]  = el_apikey.text().strip()
+            cfg["elevenlabs"]["voice_id"] = el_voiceid.text().strip()
 
             _save(cfg)
             status_lbl.setStyleSheet(f"color: {LIME}; font-size: 10px; font-family: 'JetBrains Mono', monospace;")

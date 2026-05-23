@@ -163,6 +163,12 @@ class OutputHandler:
         self._tts_lock = threading.Lock()
         self._piper_proc: subprocess.Popen | None = None
         self._aplay_proc: subprocess.Popen | None = None
+        self._mpv_proc: subprocess.Popen | None = None
+        el = cfg.get("elevenlabs", {})
+        self.el_enabled  = el.get("enabled", False)
+        self.el_api_key  = el.get("api_key", "")
+        self.el_voice_id = el.get("voice_id", "")
+        self.el_model_id = el.get("model_id", "eleven_multilingual_v2")
 
     def set_language(self, lang: str):
         self._lang = lang[:2].lower()
@@ -173,6 +179,8 @@ class OutputHandler:
                 self._aplay_proc.kill()
             if self._piper_proc and self._piper_proc.poll() is None:
                 self._piper_proc.kill()
+            if self._mpv_proc and self._mpv_proc.poll() is None:
+                self._mpv_proc.kill()
         if sys.platform != "linux":
             try:
                 import sounddevice as sd
@@ -209,9 +217,44 @@ class OutputHandler:
         if self.tts_enabled:
             self._speak(response)
 
+    def _speak_elevenlabs(self, text: str) -> None:
+        try:
+            from elevenlabs import ElevenLabs
+            client = ElevenLabs(api_key=self.el_api_key)
+            audio_iter = client.text_to_speech.stream(
+                text=text,
+                voice_id=self.el_voice_id,
+                model_id=self.el_model_id,
+            )
+            proc = subprocess.Popen(
+                ["mpv", "--no-terminal", "--demuxer=lavf", "-"],
+                stdin=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+            )
+            with self._tts_lock:
+                self._mpv_proc = proc
+            try:
+                for chunk in audio_iter:
+                    if chunk:
+                        proc.stdin.write(chunk)
+                proc.stdin.close()
+                proc.wait(timeout=120)
+            except (BrokenPipeError, OSError):
+                pass
+            finally:
+                with self._tts_lock:
+                    self._mpv_proc = None
+        except Exception as e:
+            log.warning("ElevenLabs TTS failed: %s — falling back to system TTS", e)
+            self._speak_system(text)
+
     def _speak(self, text: str):
         text = _strip_markdown(text)
         if not text.strip():
+            return
+
+        if self.el_enabled and self.el_api_key and self.el_voice_id:
+            self._speak_elevenlabs(text)
             return
 
         cmd = [str(pathlib.Path(c).expanduser()) if c.startswith("~") else c

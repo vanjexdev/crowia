@@ -12,7 +12,7 @@ audio:
   tmp_dir: /tmp/crowia
   monitor_device: 'sof-hda-dsp: - (hw:2,7)'
 whisper:
-  model: small
+  model: large
   language: es
   device: cpu
   compute_type: int8
@@ -101,7 +101,7 @@ output:
   tts_command:
   - piper-tts
   - --model
-  - /home/jesusu/.local/share/piper/es_ES-davefx-medium.onnx
+  - /home/jesusu/.local/share/piper/es_MX-claude-high.onnx
   - --output_raw
   response_width: 600
   response_height: 420
@@ -118,6 +118,11 @@ profiles:
     browser: floorp
     context: "Modo de trabajo PDM activado. El navegador preferido para este proyecto
       es Floorp. Cuando el usuario pida abrir el navegador, usa Floorp."
+elevenlabs:
+  enabled: false
+  api_key: ''
+  voice_id: ''
+  model_id: eleven_multilingual_v2
 skills:
   path: skills/
   enabled:

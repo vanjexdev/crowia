@@ -118,17 +118,26 @@ class TTSService(QObject):
             pass
         self._playerctl_play()
 
-    def speak(self, text: str) -> None:
-        """Blocking speak — full text at once (fallback / non-streaming path)."""
+    def _reload_config(self) -> None:
         try:
             import yaml
             _p = pathlib.Path(__file__).parents[2] / "config.yaml"
-            _out = yaml.safe_load(_p.read_text(encoding="utf-8"))["output"]
+            _cfg = yaml.safe_load(_p.read_text(encoding="utf-8"))
+            _out = _cfg["output"]
             self.enabled = _out["tts_enabled"]
             if _out.get("tts_command"):
                 self._tts_cmd = _out["tts_command"]
+            _el = _cfg.get("elevenlabs", {})
+            self._handler.el_enabled  = _el.get("enabled", False)
+            self._handler.el_api_key  = _el.get("api_key", "")
+            self._handler.el_voice_id = _el.get("voice_id", "")
+            self._handler.el_model_id = _el.get("model_id", "eleven_multilingual_v2")
         except Exception:
             pass
+
+    def speak(self, text: str) -> None:
+        """Blocking speak — full text at once (fallback / non-streaming path)."""
+        self._reload_config()
         if not self.enabled or not text.strip():
             return
         self.stop()
@@ -144,15 +153,7 @@ class TTSService(QObject):
 
     def begin_stream(self, first_sentence: str) -> None:
         """Start streaming TTS. Call stream_sentence() for subsequent sentences, end_stream() when done."""
-        try:
-            import yaml
-            _p = pathlib.Path(__file__).parents[2] / "config.yaml"
-            _out = yaml.safe_load(_p.read_text(encoding="utf-8"))["output"]
-            self.enabled = _out["tts_enabled"]
-            if _out.get("tts_command"):
-                self._tts_cmd = _out["tts_command"]
-        except Exception:
-            pass
+        self._reload_config()
         if not self.enabled or not first_sentence.strip():
             return
         self.stop()
