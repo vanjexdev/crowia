@@ -11,11 +11,14 @@ class InputBar(QWidget):
     camera_toggled     = pyqtSignal()
     voice_toggled      = pyqtSignal()
     always_on_toggled  = pyqtSignal()
+    drawer_requested   = pyqtSignal(str)   # emitted by compact menu button
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("input-bar")
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self._active_drawer: str | None = None
+        self._always_on_active: bool = False
 
         root = QVBoxLayout(self)
         root.setContentsMargins(10, 6, 10, 6)
@@ -34,13 +37,22 @@ class InputBar(QWidget):
         ctrl.setContentsMargins(0, 0, 0, 0)
         ctrl.setSpacing(6)
 
-        hint = QLabel("⌘K palette")
-        hint.setStyleSheet(f"color: {MUTE}; font-family: 'JetBrains Mono', monospace; font-size: 9px;")
-        ctrl.addWidget(hint)
+        self._hint = QLabel("⌘K palette")
+        self._hint.setStyleSheet(f"color: {MUTE}; font-family: 'JetBrains Mono', monospace; font-size: 9px;")
+        ctrl.addWidget(self._hint)
 
-        sep = QLabel("|")
-        sep.setStyleSheet(f"color: {MUTE}; font-size: 10px;")
-        ctrl.addWidget(sep)
+        self._sep = QLabel("|")
+        self._sep.setStyleSheet(f"color: {MUTE}; font-size: 10px;")
+        ctrl.addWidget(self._sep)
+
+        # Compact drawer menu — visible only in MIN breakpoint
+        self._btn_menu = QPushButton("☰ menú")
+        self._btn_menu.setProperty("inputBtnMenu", True)
+        self._btn_menu.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._btn_menu.setToolTip("Paneles")
+        self._btn_menu.clicked.connect(self._show_drawer_menu)
+        self._btn_menu.hide()
+        ctrl.addWidget(self._btn_menu)
 
         ctrl.addStretch()
 
@@ -77,7 +89,69 @@ class InputBar(QWidget):
     def clear(self) -> None:
         self._field.clear()
 
+    def set_compact(self, compact: bool) -> None:
+        """MIN breakpoint: show menu btn, hide decorative/secondary buttons."""
+        self._btn_menu.setVisible(compact)
+        self._hint.setVisible(not compact)
+        self._sep.setVisible(not compact)
+        self._btn_always.setVisible(not compact)
+        self._btn_cam.setVisible(not compact)
+
+    def set_active_drawer(self, name: str | None) -> None:
+        """Track which drawer is open — used to show close option in menu."""
+        self._active_drawer = name
+        if name:
+            self._btn_menu.setText("✕ cerrar")
+        else:
+            self._btn_menu.setText("☰ menú")
+
+    def _show_drawer_menu(self) -> None:
+        # If a drawer is open, close it directly without showing the menu
+        if self._active_drawer:
+            self.drawer_requested.emit(self._active_drawer)
+            return
+
+        from PyQt6.QtWidgets import QMenu
+        from PyQt6.QtGui import QCursor, QAction
+        _DRAWERS = [
+            ("◆", "memoria",   "Memoria"),
+            ("⊟", "historial", "Historial"),
+            ("◑", "sistema",   "Sistema"),
+            ("⊞", "cola",      "Cola"),
+            ("◔", "notif",     "Notificaciones"),
+            ("⬡", "tokens",    "Tokens"),
+            ("⚙", "config",    "Configuración"),
+        ]
+        menu = QMenu(self)
+        menu.setStyleSheet("""
+            QMenu { background: #0f1a2e; color: #cfd6e6;
+                    border: 1px solid rgba(93,107,133,0.5);
+                    font-family: 'JetBrains Mono', monospace; font-size: 10px; }
+            QMenu::item { padding: 5px 14px; }
+            QMenu::item:selected { background: rgba(136,201,58,0.15); color: #88c93a; }
+            QMenu::separator { height: 1px; background: rgba(93,107,133,0.4); margin: 3px 8px; }
+        """)
+
+        # Actions
+        always_glyph = "◉" if self._always_on_active else "◎"
+        act_always = menu.addAction(f"{always_glyph}  Siempre activo")
+        act_cam    = menu.addAction("◐  Cámara")
+        menu.addSeparator()
+
+        drawer_actions: dict[QAction, str] = {}
+        for glyph, name, label in _DRAWERS:
+            drawer_actions[menu.addAction(f"{glyph}  {label}")] = name
+
+        chosen = menu.exec(QCursor.pos())
+        if chosen == act_always:
+            self.always_on_toggled.emit()
+        elif chosen == act_cam:
+            self.camera_toggled.emit()
+        elif chosen in drawer_actions:
+            self.drawer_requested.emit(drawer_actions[chosen])
+
     def set_always_on(self, active: bool) -> None:
+        self._always_on_active = active
         self._btn_always.setText("◉ siempre" if active else "◎ siempre")
         self._btn_always.setProperty("alwaysActive", active)
         self._btn_always.style().unpolish(self._btn_always)

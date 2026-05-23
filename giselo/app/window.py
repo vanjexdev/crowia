@@ -36,10 +36,12 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Giselo")
-        self.setMinimumSize(500, 600)
+        self.setMinimumSize(465, 600)
         self.resize(920, 640)
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
+        self.setAttribute(Qt.WidgetAttribute.WA_Hover, True)
+        self.setMouseTracking(True)
         try:
             import yaml, pathlib as _pl
             _p = _pl.Path(__file__).parents[2] / "config.yaml"
@@ -91,6 +93,10 @@ class MainWindow(QMainWindow):
 
         from giselo.app import shortcuts
         shortcuts.register(self)
+
+        from giselo.app.resize_grip import ResizeFilter
+        self._resize_filter = ResizeFilter(self)
+        self._resize_filter.install()
 
     # ── UI Construction ───────────────────────────────────────────────────────
 
@@ -202,6 +208,7 @@ class MainWindow(QMainWindow):
         self._input_bar.camera_toggled.connect(self.toggle_camera)
         self._input_bar.voice_toggled.connect(self.toggle_voice)
         self._input_bar.always_on_toggled.connect(self.toggle_always_on)
+        self._input_bar.drawer_requested.connect(self.toggle_drawer)
         self._drawer.closed.connect(self._on_drawer_closed)
 
     # ── Breakpoint / responsive ───────────────────────────────────────────────
@@ -223,6 +230,7 @@ class MainWindow(QMainWindow):
         self._rail_right.setVisible(is_compact)
         self._stream_chat.setVisible(is_compact)
         self._cancel_bar.setVisible(is_compact and self._svc.busy if hasattr(self, '_svc') else False)
+        self._input_bar.set_compact(is_min)
 
         # Close drawer if we drop below MEDIUM
         if not is_medium and self._drawer.is_open():
@@ -328,6 +336,7 @@ class MainWindow(QMainWindow):
         if self._drawer.is_open():
             self._drawer.close_drawer()
             self._rail_left.set_active(None)
+            self._input_bar.set_active_drawer(None)
             state.active_drawer = None
 
     def switch_instance(self, name: str) -> None:
@@ -386,6 +395,7 @@ class MainWindow(QMainWindow):
         build_fn(layout)
 
         self._rail_left.set_active(name)
+        self._input_bar.set_active_drawer(name)
         self._drawer.open_drawer()
         if name == "historial":
             self._drawer.scroll_to_bottom()
@@ -439,6 +449,7 @@ class MainWindow(QMainWindow):
     def _on_drawer_closed(self) -> None:
         self._rail_left.set_active(None)
         state.active_drawer = None
+        self._input_bar.set_active_drawer(None)
 
     def _on_rail_right(self, action: str) -> None:
         if action == "voz":
