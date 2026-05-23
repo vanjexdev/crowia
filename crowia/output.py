@@ -218,35 +218,47 @@ class OutputHandler:
             self._speak(response)
 
     def _speak_elevenlabs(self, text: str) -> None:
+        import tempfile, os
+        tmp_path = None
         try:
             from elevenlabs import ElevenLabs
             client = ElevenLabs(api_key=self.el_api_key)
+            log.info("ElevenLabs TTS: voice=%s model=%s text=%r",
+                     self.el_voice_id[:8], self.el_model_id, text[:60])
             audio_iter = client.text_to_speech.stream(
                 text=text,
                 voice_id=self.el_voice_id,
                 model_id=self.el_model_id,
             )
+            # Write to temp file first — more reliable than stdin pipe
+            with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
+                tmp_path = f.name
+                total = 0
+                for chunk in audio_iter:
+                    if chunk:
+                        f.write(chunk)
+                        total += len(chunk)
+            log.info("ElevenLabs TTS: received %d bytes", total)
+            if total < 512:
+                log.warning("ElevenLabs TTS: suspiciously small response (%d bytes) — possible API error", total)
             proc = subprocess.Popen(
-                ["mpv", "--no-terminal", "--demuxer-lavf-format=mp3", "-"],
-                stdin=subprocess.PIPE,
+                ["mpv", "--no-terminal", tmp_path],
                 stderr=subprocess.DEVNULL,
             )
             with self._tts_lock:
                 self._mpv_proc = proc
-            try:
-                for chunk in audio_iter:
-                    if chunk:
-                        proc.stdin.write(chunk)
-                proc.stdin.close()
-                proc.wait(timeout=120)
-            except (BrokenPipeError, OSError):
-                pass
-            finally:
-                with self._tts_lock:
-                    self._mpv_proc = None
+            proc.wait(timeout=120)
         except Exception as e:
             log.warning("ElevenLabs TTS failed: %s — falling back to system TTS", e)
             self._speak_system(text)
+        finally:
+            with self._tts_lock:
+                self._mpv_proc = None
+            if tmp_path:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
 
     def _speak(self, text: str):
         text = _strip_markdown(text)
