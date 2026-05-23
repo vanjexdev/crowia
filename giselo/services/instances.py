@@ -79,9 +79,23 @@ class InstanceService(QObject):
         return result
 
     def _inject_backend_name(self, name: str) -> None:
+        import yaml, pathlib
         base = self._assistant._base_prompt
+        persona_line = ""
+        try:
+            _cfg = yaml.safe_load(
+                (pathlib.Path(__file__).parents[2] / "config.yaml").read_text(encoding="utf-8")
+            )
+            asst = _cfg.get("assistant", {})
+            gender = asst.get("gender", "male")
+            persona_name = asst.get("name_female" if gender == "female" else "name_male", "Giselo")
+            base = base.replace("Giselo", persona_name)
+            if gender == "female":
+                persona_line = f" Actúa con personalidad femenina. Tu nombre es {persona_name}."
+        except Exception:
+            pass
         self._assistant.system_prompt = (
-            f"{base}\n\nEstás corriendo sobre el backend '{name}'."
+            f"{base}\n\nEstás corriendo sobre el backend '{name}'.{persona_line}"
         )
 
     def ask(self, text: str) -> None:

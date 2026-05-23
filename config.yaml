@@ -21,7 +21,7 @@ whisper:
     terminal, busca, qué es, cómo se hace, mira la pantalla, sube el volumen, 
     baja el volumen.
 claude:
-  model: claude-haiku-4-5
+  model: claude-sonnet-4-6
   api_key: ""
   system_prompt: 'Tu nombre es Giselo. NUNCA te identifiques como Claude, Anthropic,
     ni ningún otro nombre — siempre eres Giselo. Si alguien pregunta quién eres, di
@@ -101,7 +101,7 @@ output:
   tts_command:
   - piper-tts
   - --model
-  - /home/jesusu/.local/share/piper/es_MX-claude-high.onnx
+  - /home/jesusu/.local/share/piper/es_AR-daniela-high.onnx
   - --output_raw
   response_width: 600
   response_height: 420
@@ -118,17 +118,21 @@ profiles:
     browser: floorp
     context: "Modo de trabajo PDM activado. El navegador preferido para este proyecto
       es Floorp. Cuando el usuario pida abrir el navegador, usa Floorp."
+assistant:
+  gender: male
+  name_male: Giselo
+  name_female: Giseth
 elevenlabs:
   enabled: false
-  api_key: ''
-  voice_id: ''
+  api_key: 'sk_69ce973f1f41fea1130b2f6f24ede0064bee503108563a56'
+  voice_id: 'tdBy2L4e43Cgb91Z2iN6'
   model_id: eleven_multilingual_v2
 skills:
   path: skills/
   enabled:
+  - browser
   - cachyos-kde
   - google
   - remind
-  - browser
 ui:
   accent: "#88c93a"

@@ -37,7 +37,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("Giselo")
         self.setMinimumSize(500, 600)
-        self.resize(820, 640)
+        self.resize(920, 640)
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
         try:
@@ -596,4 +596,4 @@ class MainWindow(QMainWindow):
         self._status_bar.set_mem(state.mem_tokens)
 
     def sizeHint(self) -> QSize:
-        return QSize(820, 640)
+        return QSize(920, 640)

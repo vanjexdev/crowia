@@ -2,7 +2,7 @@ import pathlib
 from ruamel.yaml import YAML
 from PyQt6.QtWidgets import (QLabel, QVBoxLayout, QHBoxLayout, QComboBox,
                               QCheckBox, QLineEdit, QPushButton, QFrame,
-                              QWidget, QSpinBox)
+                              QWidget, QSpinBox, QRadioButton, QButtonGroup)
 from PyQt6.QtCore import Qt
 from giselo.app.theme import LIME, CYAN, ORANGE, MUTE, INK, RED, CHROME
 
@@ -45,26 +45,55 @@ def _row_label(text: str) -> QLabel:
     return lbl
 
 
-def _combo(options: list[str], current: str) -> QComboBox:
-    cb = QComboBox()
-    cb.addItems(options)
-    cb.setStyleSheet(f"""
-        QComboBox {{
-            background: rgba(15,26,46,0.8); color: {INK};
-            border: 1px solid rgba(93,107,133,0.4); border-radius: 4px;
-            font-size: 10px; font-family: 'JetBrains Mono', monospace;
-            padding: 2px 6px;
-        }}
-        QComboBox::drop-down {{ border: none; width: 16px; }}
-        QComboBox QAbstractItemView {{
-            background: #0f1a2e; color: {INK};
-            selection-background-color: rgba(136,201,58,0.15);
-        }}
-    """)
-    idx = cb.findText(current)
-    if idx >= 0:
-        cb.setCurrentIndex(idx)
-    return cb
+def _rb_style() -> str:
+    return f"color: {INK}; font-size: 10px; font-family: 'JetBrains Mono', monospace;"
+
+
+def _radio_h(options: list[str], current: str):
+    """Horizontal radio group. Returns (widget, getter_fn)."""
+    w = QWidget()
+    lay = QHBoxLayout(w)
+    lay.setContentsMargins(0, 0, 0, 0)
+    lay.setSpacing(12)
+    group = QButtonGroup(w)
+    buttons: list[QRadioButton] = []
+    for opt in options:
+        rb = QRadioButton(opt)
+        rb.setChecked(opt == current)
+        rb.setStyleSheet(_rb_style())
+        group.addButton(rb)
+        lay.addWidget(rb)
+        buttons.append(rb)
+    lay.addStretch()
+    def get():
+        for rb in buttons:
+            if rb.isChecked():
+                return rb.text()
+        return current
+    return w, get
+
+
+def _radio_v(options: list[tuple[str, str]], current_val: str):
+    """Vertical radio group with (display, value) pairs. Returns (widget, getter_fn)."""
+    w = QWidget()
+    lay = QVBoxLayout(w)
+    lay.setContentsMargins(0, 2, 0, 2)
+    lay.setSpacing(2)
+    group = QButtonGroup(w)
+    buttons: list[tuple[QRadioButton, str]] = []
+    for display, val in options:
+        rb = QRadioButton(display)
+        rb.setChecked(val == current_val)
+        rb.setStyleSheet(_rb_style())
+        group.addButton(rb)
+        lay.addWidget(rb)
+        buttons.append((rb, val))
+    def get():
+        for rb, val in buttons:
+            if rb.isChecked():
+                return val
+        return current_val
+    return w, get
 
 
 def _lineedit(value: str) -> QLineEdit:
@@ -110,23 +139,17 @@ def _add_row(layout: QVBoxLayout, label: str, widget: QWidget) -> None:
 
 def _list_piper_voices() -> list[tuple[str, str]]:
     """Return [(display_name, model_path)] for every .onnx in ~/.local/share/piper/."""
-    import pathlib
     piper_dir = pathlib.Path.home() / ".local/share/piper"
     voices = []
     for f in sorted(piper_dir.glob("*.onnx")):
-        display = f.stem  # e.g. es_ES-davefx-medium
-        voices.append((display, str(f)))
+        voices.append((f.stem, str(f)))
     return voices or [("(ninguna instalada)", "")]
 
 
 def _list_input_devices() -> list[tuple[str, str]]:
-    """Return [(display_name, sounddevice_key)].
-    Uses pactl alsa.card to map hw:X device names to friendly descriptions.
-    Webcam/Bluetooth only reachable via 'pipewire' device.
-    """
-    # Parse pactl sources: build card_desc (alsa card→desc) + via_pipewire (non-ALSA sources)
+    """Return [(display_name, sounddevice_key)]."""
     card_desc: dict[int, str] = {}
-    via_pipewire: list[tuple[str, str]] = []  # (display, pactl_source_name)
+    via_pipewire: list[tuple[str, str]] = []
     try:
         import subprocess, re as _re
         r = subprocess.run(["pactl", "list", "sources"],
@@ -148,7 +171,6 @@ def _list_input_devices() -> list[tuple[str, str]]:
                         if card is not None:
                             card_desc[card] = desc
                         else:
-                            # Bluetooth, USB-audio not exposed as ALSA card → via PipeWire
                             kind = "bluetooth" if name.startswith("bluez_") else "usb"
                             via_pipewire.append((f"{desc}  ({kind}, via PipeWire)", name))
                     name = desc = card = None
@@ -167,9 +189,9 @@ def _list_input_devices() -> list[tuple[str, str]]:
                 continue
             seen.add(sd_name)
             if sd_name == "pipewire":
-                display = "PipeWire  –  predeterminado del sistema"
+                display = "PipeWire  -  predeterminado del sistema"
             elif sd_name == "pulse":
-                display = "PulseAudio  –  predeterminado del sistema"
+                display = "PulseAudio  -  predeterminado del sistema"
             else:
                 m = _re.search(r'\(hw:(\d+)', sd_name)
                 if m and int(m.group(1)) in card_desc:
@@ -180,7 +202,6 @@ def _list_input_devices() -> list[tuple[str, str]]:
     except Exception:
         pass
 
-    # Append specific Bluetooth/USB devices (accessed via PULSE_SOURCE trick)
     for display, pactl_name in via_pipewire:
         items.append((display, pactl_name))
 
@@ -197,13 +218,24 @@ def build(layout: QVBoxLayout) -> None:
         layout.insertWidget(layout.count() - 1, lbl)
         return
 
-    # ── Micrófono ─────────────────────────────────────────────────────────────
-    _section_title(layout, "Micrófono")
-    mic_devices  = _list_input_devices()           # [(display, key), ...]
-    current_mic  = cfg.get("audio", {}).get("monitor_device", "default")
+    # ── Perfil / Persona ──────────────────────────────────────────────────────
+    _section_title(layout, "Perfil")
+    _asst = cfg.get("assistant", {})
+    asst_gender_w, get_asst_gender = _radio_h(["male", "female"], _asst.get("gender", "male"))
+    asst_name_male   = _lineedit(_asst.get("name_male",   "Giselo"))
+    asst_name_female = _lineedit(_asst.get("name_female", "Giseth"))
+    _add_row(layout, "genero",    asst_gender_w)
+    _add_row(layout, "nombre M",  asst_name_male)
+    _add_row(layout, "nombre F",  asst_name_female)
 
-    mic_combo = QComboBox()
-    mic_combo.setStyleSheet(f"""
+    _sep(layout)
+
+    # ── Micrófono ─────────────────────────────────────────────────────────────
+    _section_title(layout, "Microfono")
+    mic_devices = _list_input_devices()
+    current_mic = cfg.get("audio", {}).get("monitor_device", "default")
+
+    _combo_style = f"""
         QComboBox {{
             background: rgba(15,26,46,0.8); color: {INK};
             border: 1px solid rgba(93,107,133,0.4); border-radius: 4px;
@@ -215,15 +247,16 @@ def build(layout: QVBoxLayout) -> None:
             background: #0f1a2e; color: {INK};
             selection-background-color: rgba(136,201,58,0.15);
         }}
-    """)
+    """
+    mic_combo = QComboBox()
+    mic_combo.setStyleSheet(_combo_style)
+    mic_combo.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
     for display, key in mic_devices:
         mic_combo.addItem(display, userData=key)
-    # Select current saved device
     for i in range(mic_combo.count()):
         if mic_combo.itemData(i) == current_mic:
             mic_combo.setCurrentIndex(i)
             break
-
     _add_row(layout, "dispositivo", mic_combo)
 
     _sep(layout)
@@ -232,39 +265,14 @@ def build(layout: QVBoxLayout) -> None:
     _section_title(layout, "TTS")
     tts_toggle = QCheckBox("Hablar respuestas")
     tts_toggle.setChecked(cfg["output"].get("tts_enabled", False))
-    tts_toggle.setStyleSheet(
-        f"color: {INK}; font-size: 10px; font-family: 'JetBrains Mono', monospace;"
-    )
+    tts_toggle.setStyleSheet(_rb_style())
     layout.insertWidget(layout.count() - 1, tts_toggle)
 
-    # Voice selector
     tts_voices = _list_piper_voices()
-    # detect current model path from tts_command list
     _tts_cmd = cfg["output"].get("tts_command", [])
-    _current_model = next(
-        (s for s in _tts_cmd if s.endswith(".onnx")), ""
-    )
-    tts_voice_combo = QComboBox()
-    tts_voice_combo.setStyleSheet(f"""
-        QComboBox {{
-            background: rgba(15,26,46,0.8); color: {INK};
-            border: 1px solid rgba(93,107,133,0.4); border-radius: 4px;
-            font-size: 10px; font-family: 'JetBrains Mono', monospace;
-            padding: 2px 6px;
-        }}
-        QComboBox::drop-down {{ border: none; width: 16px; }}
-        QComboBox QAbstractItemView {{
-            background: #0f1a2e; color: {INK};
-            selection-background-color: rgba(136,201,58,0.15);
-        }}
-    """)
-    for display, path in tts_voices:
-        tts_voice_combo.addItem(display, userData=path)
-    for i in range(tts_voice_combo.count()):
-        if tts_voice_combo.itemData(i) == _current_model:
-            tts_voice_combo.setCurrentIndex(i)
-            break
-    _add_row(layout, "voz", tts_voice_combo)
+    _current_model = next((s for s in _tts_cmd if s.endswith(".onnx")), "")
+    tts_voice_w, get_tts_voice = _radio_v(tts_voices, _current_model)
+    _add_row(layout, "voz", tts_voice_w)
 
     _sep(layout)
 
@@ -273,29 +281,31 @@ def build(layout: QVBoxLayout) -> None:
     _el = cfg.get("elevenlabs", {})
     el_toggle = QCheckBox("Usar ElevenLabs (reemplaza Piper)")
     el_toggle.setChecked(_el.get("enabled", False))
-    el_toggle.setStyleSheet(
-        f"color: {INK}; font-size: 10px; font-family: 'JetBrains Mono', monospace;"
-    )
+    el_toggle.setStyleSheet(_rb_style())
     layout.insertWidget(layout.count() - 1, el_toggle)
     el_apikey = _lineedit(_el.get("api_key", ""))
     el_apikey.setEchoMode(el_apikey.EchoMode.Password)
     el_voiceid = _lineedit(_el.get("voice_id", ""))
-    _add_row(layout, "api key", el_apikey)
+    _add_row(layout, "api key",  el_apikey)
     _add_row(layout, "voice id", el_voiceid)
 
     _sep(layout)
 
     # ── Whisper ───────────────────────────────────────────────────────────────
     _section_title(layout, "Whisper / STT")
-    wh_model  = _combo(["tiny","base","small","medium","large"],
-                       cfg["whisper"].get("model","small"))
-    wh_lang   = _lineedit(cfg["whisper"].get("language") or "es")
+    wh_model_w, get_wh_model = _radio_h(
+        ["tiny", "base", "small", "medium", "large"],
+        cfg["whisper"].get("model", "small"),
+    )
+    wh_lang = _lineedit(cfg["whisper"].get("language") or "es")
     wh_lang.setMaxLength(5)
-    wh_device = _combo(["cpu","cuda"], cfg["whisper"].get("device","cpu"))
-
-    _add_row(layout, "modelo",    wh_model)
-    _add_row(layout, "idioma",    wh_lang)
-    _add_row(layout, "dispositivo", wh_device)
+    wh_device_w, get_wh_device = _radio_h(
+        ["cpu", "cuda"],
+        cfg["whisper"].get("device", "cpu"),
+    )
+    _add_row(layout, "modelo",      wh_model_w)
+    _add_row(layout, "idioma",      wh_lang)
+    _add_row(layout, "dispositivo", wh_device_w)
 
     _sep(layout)
 
@@ -308,9 +318,7 @@ def build(layout: QVBoxLayout) -> None:
     for sk in _available_skills:
         cb = QCheckBox(sk)
         cb.setChecked(sk in _enabled_skills)
-        cb.setStyleSheet(
-            f"color: {INK}; font-size: 10px; font-family: 'JetBrains Mono', monospace;"
-        )
+        cb.setStyleSheet(_rb_style())
         layout.insertWidget(layout.count() - 1, cb)
         skill_checks[sk] = cb
 
@@ -326,27 +334,27 @@ def build(layout: QVBoxLayout) -> None:
     backend_widgets: dict = {}
 
     if backend == "claude":
-        cl_model = _combo(
+        cl_model_w, get_cl_model = _radio_h(
             ["claude-haiku-4-5", "claude-sonnet-4-6", "claude-opus-4-7",
              "claude-haiku-3-5", "claude-sonnet-3-7"],
             cfg["claude"].get("model", "claude-haiku-4-5"),
         )
-        _add_row(layout, "modelo", cl_model)
-        backend_widgets["cl_model"] = cl_model
+        _add_row(layout, "modelo", cl_model_w)
+        backend_widgets["get_cl_model"] = get_cl_model
 
     elif backend == "codex":
-        cx_model   = _lineedit(cfg["codex"].get("model") or "")
-        cx_model.setPlaceholderText("dejar vacío = default")
-        cx_sandbox = _combo(
+        cx_model = _lineedit(cfg["codex"].get("model") or "")
+        cx_model.setPlaceholderText("dejar vacio = default")
+        cx_sandbox_w, get_cx_sandbox = _radio_h(
             ["read-only", "workspace-write", "danger-full-access"],
             cfg["codex"].get("sandbox", "danger-full-access"),
         )
         cx_workdir = _lineedit(cfg["codex"].get("working_dir") or "")
-        cx_workdir.setPlaceholderText("vacío = dir del archivo")
-        _add_row(layout, "modelo",    cx_model)
-        _add_row(layout, "sandbox",   cx_sandbox)
-        _add_row(layout, "work dir",  cx_workdir)
-        backend_widgets.update(cx_model=cx_model, cx_sandbox=cx_sandbox,
+        cx_workdir.setPlaceholderText("vacio = dir del archivo")
+        _add_row(layout, "modelo",   cx_model)
+        _add_row(layout, "sandbox",  cx_sandbox_w)
+        _add_row(layout, "work dir", cx_workdir)
+        backend_widgets.update(cx_model=cx_model, get_cx_sandbox=get_cx_sandbox,
                                cx_workdir=cx_workdir)
 
     elif backend == "opencode":
@@ -360,9 +368,7 @@ def build(layout: QVBoxLayout) -> None:
     _section_title(layout, "Historial")
     hist_enabled = QCheckBox("Guardar historial")
     hist_enabled.setChecked(cfg["history"].get("enabled", True))
-    hist_enabled.setStyleSheet(
-        f"color: {INK}; font-size: 10px; font-family: 'JetBrains Mono', monospace;"
-    )
+    hist_enabled.setStyleSheet(_rb_style())
     layout.insertWidget(layout.count() - 1, hist_enabled)
 
     hist_turns = _spinbox(cfg["history"].get("max_turns", 10), 1, 100)
@@ -393,9 +399,10 @@ def build(layout: QVBoxLayout) -> None:
             if "audio" not in cfg:
                 cfg["audio"] = {}
             cfg["audio"]["monitor_device"] = mic_combo.currentData()
-            cfg["output"]["tts_enabled"]  = tts_toggle.isChecked()
+            cfg["output"]["tts_enabled"] = tts_toggle.isChecked()
+
             # Update tts_command model path
-            _new_model = tts_voice_combo.currentData()
+            _new_model = get_tts_voice()
             if _new_model and "tts_command" in cfg["output"]:
                 _cmd = list(cfg["output"]["tts_command"])
                 for i, part in enumerate(_cmd):
@@ -403,32 +410,40 @@ def build(layout: QVBoxLayout) -> None:
                         _cmd[i] = _new_model
                         break
                 cfg["output"]["tts_command"] = _cmd
-            cfg["whisper"]["model"]       = wh_model.currentText()
-            cfg["whisper"]["language"]    = wh_lang.text().strip() or None
-            cfg["whisper"]["device"]      = wh_device.currentText()
-            cfg["history"]["enabled"]     = hist_enabled.isChecked()
-            cfg["history"]["max_turns"]   = hist_turns.value()
 
-            if backend == "claude" and "cl_model" in backend_widgets:
-                cfg["claude"]["model"] = backend_widgets["cl_model"].currentText()
+            cfg["whisper"]["model"]    = get_wh_model()
+            cfg["whisper"]["language"] = wh_lang.text().strip() or None
+            cfg["whisper"]["device"]   = get_wh_device()
+            cfg["history"]["enabled"]  = hist_enabled.isChecked()
+            cfg["history"]["max_turns"] = hist_turns.value()
+
+            if backend == "claude" and "get_cl_model" in backend_widgets:
+                cfg["claude"]["model"] = backend_widgets["get_cl_model"]()
             elif backend == "codex":
                 cfg["codex"]["model"]       = backend_widgets["cx_model"].text().strip()
-                cfg["codex"]["sandbox"]     = backend_widgets["cx_sandbox"].currentText()
+                cfg["codex"]["sandbox"]     = backend_widgets["get_cx_sandbox"]()
                 cfg["codex"]["working_dir"] = backend_widgets["cx_workdir"].text().strip()
             elif backend == "opencode":
                 cfg["opencode"]["model"] = backend_widgets["oc_model"].text().strip()
 
-            # Update enabled skills
+            # Skills
             if "skills" not in cfg:
                 cfg["skills"] = {}
             cfg["skills"]["enabled"] = [sk for sk, cb in skill_checks.items() if cb.isChecked()]
 
-            # Update ElevenLabs config
+            # ElevenLabs
             if "elevenlabs" not in cfg:
                 cfg["elevenlabs"] = {}
             cfg["elevenlabs"]["enabled"]  = el_toggle.isChecked()
             cfg["elevenlabs"]["api_key"]  = el_apikey.text().strip()
             cfg["elevenlabs"]["voice_id"] = el_voiceid.text().strip()
+
+            # Persona
+            if "assistant" not in cfg:
+                cfg["assistant"] = {}
+            cfg["assistant"]["gender"]      = get_asst_gender()
+            cfg["assistant"]["name_male"]   = asst_name_male.text().strip()   or "Giselo"
+            cfg["assistant"]["name_female"] = asst_name_female.text().strip() or "Giseth"
 
             _save(cfg)
             status_lbl.setStyleSheet(f"color: {LIME}; font-size: 10px; font-family: 'JetBrains Mono', monospace;")
