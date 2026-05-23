@@ -59,7 +59,7 @@ def build(layout: QVBoxLayout) -> None:
     else:
         for phrase in recent:
             short = phrase[:60] + ("…" if len(phrase) > 60 else "")
-            lbl = QLabel(f""{short}"")
+            lbl = QLabel(f'“{short}”')
             lbl.setStyleSheet(f"color: {INK}; font-size: 10px; font-style: italic;")
             lbl.setWordWrap(True)
             layout.insertWidget(layout.count() - 1, lbl)

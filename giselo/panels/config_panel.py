@@ -108,6 +108,17 @@ def _add_row(layout: QVBoxLayout, label: str, widget: QWidget) -> None:
     layout.insertWidget(layout.count() - 1, row)
 
 
+def _list_piper_voices() -> list[tuple[str, str]]:
+    """Return [(display_name, model_path)] for every .onnx in ~/.local/share/piper/."""
+    import pathlib
+    piper_dir = pathlib.Path.home() / ".local/share/piper"
+    voices = []
+    for f in sorted(piper_dir.glob("*.onnx")):
+        display = f.stem  # e.g. es_ES-davefx-medium
+        voices.append((display, str(f)))
+    return voices or [("(ninguna instalada)", "")]
+
+
 def _list_input_devices() -> list[tuple[str, str]]:
     """Return [(display_name, sounddevice_key)].
     Uses pactl alsa.card to map hw:X device names to friendly descriptions.
@@ -226,6 +237,35 @@ def build(layout: QVBoxLayout) -> None:
     )
     layout.insertWidget(layout.count() - 1, tts_toggle)
 
+    # Voice selector
+    tts_voices = _list_piper_voices()
+    # detect current model path from tts_command list
+    _tts_cmd = cfg["output"].get("tts_command", [])
+    _current_model = next(
+        (s for s in _tts_cmd if s.endswith(".onnx")), ""
+    )
+    tts_voice_combo = QComboBox()
+    tts_voice_combo.setStyleSheet(f"""
+        QComboBox {{
+            background: rgba(15,26,46,0.8); color: {INK};
+            border: 1px solid rgba(93,107,133,0.4); border-radius: 4px;
+            font-size: 10px; font-family: 'JetBrains Mono', monospace;
+            padding: 2px 6px;
+        }}
+        QComboBox::drop-down {{ border: none; width: 16px; }}
+        QComboBox QAbstractItemView {{
+            background: #0f1a2e; color: {INK};
+            selection-background-color: rgba(136,201,58,0.15);
+        }}
+    """)
+    for display, path in tts_voices:
+        tts_voice_combo.addItem(display, userData=path)
+    for i in range(tts_voice_combo.count()):
+        if tts_voice_combo.itemData(i) == _current_model:
+            tts_voice_combo.setCurrentIndex(i)
+            break
+    _add_row(layout, "voz", tts_voice_combo)
+
     _sep(layout)
 
     # ── Whisper ───────────────────────────────────────────────────────────────
@@ -320,6 +360,15 @@ def build(layout: QVBoxLayout) -> None:
                 cfg["audio"] = {}
             cfg["audio"]["monitor_device"] = mic_combo.currentData()
             cfg["output"]["tts_enabled"]  = tts_toggle.isChecked()
+            # Update tts_command model path
+            _new_model = tts_voice_combo.currentData()
+            if _new_model and "tts_command" in cfg["output"]:
+                _cmd = list(cfg["output"]["tts_command"])
+                for i, part in enumerate(_cmd):
+                    if str(part).endswith(".onnx"):
+                        _cmd[i] = _new_model
+                        break
+                cfg["output"]["tts_command"] = _cmd
             cfg["whisper"]["model"]       = wh_model.currentText()
             cfg["whisper"]["language"]    = wh_lang.text().strip() or None
             cfg["whisper"]["device"]      = wh_device.currentText()

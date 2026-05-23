@@ -97,12 +97,11 @@ def build(layout: QVBoxLayout) -> None:
         net_d.update(min(100, dr / 10), _fmt(dr))
         net_u.update(min(100, ds / 10), _fmt(ds))
 
-    # Refresh every 2s; initial call now
     _refresh()
     timer = QTimer()
     timer.setInterval(2000)
     timer.timeout.connect(_refresh)
     timer.start()
 
-    # Keep timer alive by attaching to one of the widgets
     cpu_row._sys_timer = timer
+    cpu_row.destroyed.connect(timer.stop)

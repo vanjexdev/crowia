@@ -10,8 +10,7 @@ audio:
   rate: 16000
   format: S16_LE
   tmp_dir: /tmp/crowia
-  monitor_device: 
-    alsa_input.usb-webcamvendor_NexiGo_N60_FHD_Webcam_Jan_29_2024-10_32_28-N60-02.mono-fallback
+  monitor_device: 'sof-hda-dsp: - (hw:2,7)'
 whisper:
   model: small
   language: es

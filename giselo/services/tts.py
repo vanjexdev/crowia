@@ -123,7 +123,10 @@ class TTSService(QObject):
         try:
             import yaml
             _p = pathlib.Path(__file__).parents[2] / "config.yaml"
-            self.enabled = yaml.safe_load(_p.read_text(encoding="utf-8"))["output"]["tts_enabled"]
+            _out = yaml.safe_load(_p.read_text(encoding="utf-8"))["output"]
+            self.enabled = _out["tts_enabled"]
+            if _out.get("tts_command"):
+                self._tts_cmd = _out["tts_command"]
         except Exception:
             pass
         if not self.enabled or not text.strip():
@@ -141,6 +144,15 @@ class TTSService(QObject):
 
     def begin_stream(self, first_sentence: str) -> None:
         """Start streaming TTS. Call stream_sentence() for subsequent sentences, end_stream() when done."""
+        try:
+            import yaml
+            _p = pathlib.Path(__file__).parents[2] / "config.yaml"
+            _out = yaml.safe_load(_p.read_text(encoding="utf-8"))["output"]
+            self.enabled = _out["tts_enabled"]
+            if _out.get("tts_command"):
+                self._tts_cmd = _out["tts_command"]
+        except Exception:
+            pass
         if not self.enabled or not first_sentence.strip():
             return
         self.stop()
