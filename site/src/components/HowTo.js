@@ -22,23 +22,12 @@ const STEPS = [
     {
         n: 3,
         title: 'Launch Giselo',
-        desc: 'Start the desktop overlay with hotkey mode, always-on wake word, or use the multi-instance launcher.',
+        desc: 'Run the system diagnostic first, then start the desktop overlay. The doctor auto-detects your audio, TTS, and hotkey setup.',
         code: [
-            { type: 'comment', text: '# Desktop overlay (hotkey mode)' },
+            { type: 'comment', text: '# Verify system dependencies' },
+            { type: 'cmd', text: 'giselo', args: ' doctor' },
+            { type: 'comment', text: '# Launch desktop overlay' },
             { type: 'cmd', text: 'giselo', args: '' },
-            { type: 'comment', text: '# Always-on wake word ("oye giselo")' },
-            { type: 'cmd', text: 'giselo', args: ' --always-on' },
-            { type: 'comment', text: '# Multi-instance launcher' },
-            { type: 'cmd', text: 'giselo-launcher', args: '' },
-        ],
-    },
-    {
-        n: 4,
-        title: 'Optional: Web App',
-        desc: 'Run the FastAPI server to access Giselo from any device on your network. Installable as a PWA.',
-        code: [
-            { type: 'comment', text: '# Web app (PWA, works on mobile)' },
-            { type: 'cmd', text: 'giselo', args: ' web' },
         ],
     },
 ];

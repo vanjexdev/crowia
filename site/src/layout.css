@@ -9,7 +9,7 @@
     transition: all 0.3s ease;
 }
 .navbar.scrolled {
-    background: rgba(20, 18, 24, 0.85);
+    background: rgba(10, 16, 32, 0.85);
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
     border-bottom: 1px solid var(--md-outline-variant);
@@ -81,7 +81,7 @@
     transform: translateX(-50%);
     width: 800px;
     height: 600px;
-    background: radial-gradient(ellipse at center, rgba(79,55,139,0.35) 0%, transparent 70%);
+    background: radial-gradient(ellipse at center, rgba(58,158,224,0.25) 0%, transparent 70%);
     pointer-events: none;
     z-index: -1;
 }
@@ -115,7 +115,6 @@
     justify-content: center;
     padding-bottom: 16px;
 }
-.hero-phone { align-self: center; }
 .hero-laptop { align-self: flex-end; }
 
 /* ── Features ── */
@@ -323,7 +322,6 @@
         order: -1;
         gap: 16px;
     }
-    .hero-laptop { display: none; }
     .hero-content { align-items: center; text-align: center; }
     .hero-badges, .hero-actions { justify-content: center; }
     .hero-sub { text-align: center; }

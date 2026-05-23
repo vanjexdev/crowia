@@ -44,17 +44,8 @@ export default {
                 </div>
             </div>
 
-            <!-- Mockups -->
+            <!-- Mockup -->
             <div class="hero-mockups">
-                <!-- Phone mockup — Giselo Web PWA -->
-                <div class="mockup-phone hero-phone" style="transform: rotate(-4deg) translateY(20px);">
-                    <div class="mockup-phone-island"></div>
-                    <div class="mockup-phone-screen">
-                        <img src="/crowia/mobile.gif" alt="Giselo Web App" />
-                    </div>
-                </div>
-
-                <!-- Laptop mockup — Desktop overlay -->
                 <div class="mockup-laptop hero-laptop">
                     <div class="mockup-laptop-lid">
                         <div class="mockup-laptop-display">

@@ -1,4 +1,4 @@
-#!/home/jesusu/Workspace/agents/crowia/.venv/bin/python3
+#!/usr/bin/env python3
 """
 giselo-launch-app <binary> [window_name]
 Raises existing window if app already running, otherwise launches it.

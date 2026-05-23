@@ -1,4 +1,4 @@
-#!/home/jesusu/Workspace/agents/crowia/.venv/bin/python3
+#!/usr/bin/env python3
 """
 giselo-playwright [--headless] <acción> [args...]
 Cliente CLI para debugging/automatización con Chromium via Playwright.

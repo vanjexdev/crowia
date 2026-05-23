@@ -8,14 +8,14 @@ const ADVANTAGES = [
     {
         icon: 'hearing',
         color: '#A3D8F4',
-        title: 'Local speech, no cloud',
-        desc: 'Transcription runs on faster-whisper (CPU, fully offline). Voice synthesis uses piper-tts locally. Your audio never leaves your machine — not even for a millisecond.',
+        title: 'Local speech — or cloud when you want',
+        desc: 'Transcription runs on faster-whisper (CPU, fully offline). Voice synthesis defaults to piper-tts locally — your audio never leaves your machine. If you prefer studio quality, flip a switch to use ElevenLabs with your own cloned voice.',
     },
     {
         icon: 'lock',
         color: '#D0BCFF',
-        title: 'True privacy',
-        desc: 'Nothing is sent to a third-party speech service. Your conversations stay in a local JSON file. No telemetry, no analytics, no account required.',
+        title: 'True privacy by default',
+        desc: 'Nothing is sent to a third-party speech service unless you opt in. Your conversations stay in a local JSON file. No telemetry, no analytics, no account required.',
     },
     {
         icon: 'bolt',
@@ -38,14 +38,15 @@ const ADVANTAGES = [
 ];
 
 const COMPARE = [
-    { feature: 'LLM cost',            giselo: 'Free (CLI)',         others: 'Per-token API billing' },
-    { feature: 'Speech-to-text',      giselo: 'Local (Whisper)',    others: 'Cloud API (charged)' },
-    { feature: 'Text-to-speech',      giselo: 'Local (piper-tts)',  others: 'Cloud API (charged)' },
-    { feature: 'Audio privacy',       giselo: 'Never leaves device',others: 'Sent to cloud' },
-    { feature: 'Account required',    giselo: 'No',                 others: 'Yes (API key)' },
-    { feature: 'Desktop overlay',     giselo: '✓',                  others: '✗' },
-    { feature: 'Wake word (offline)', giselo: '✓',                  others: 'Rarely' },
-    { feature: 'Self-hosted web app', giselo: '✓ (PWA)',            others: 'Sometimes' },
+    { feature: 'LLM cost',              giselo: 'Free (CLI)',                    others: 'Per-token API billing' },
+    { feature: 'Speech-to-text',        giselo: 'Local (Whisper)',               others: 'Cloud API (charged)' },
+    { feature: 'Text-to-speech',        giselo: 'Local (piper-tts) or ElevenLabs (opt-in)', others: 'Cloud API only (charged)' },
+    { feature: 'Audio privacy',         giselo: 'Local by default',              others: 'Sent to cloud' },
+    { feature: 'Streaming + Cancel',    giselo: '✓ (sentence-level TTS)',        others: 'Rarely' },
+    { feature: 'Persona / gender',      giselo: '✓ (hot-reload, no restart)',    others: '✗' },
+    { feature: 'Toggleable skills',     giselo: '✓ (custom .md files)',          others: '✗' },
+    { feature: 'Desktop overlay',       giselo: '✓',                             others: '✗' },
+    { feature: 'Wake word (offline)',   giselo: '✓',                             others: 'Rarely' },
 ];
 
 export default {

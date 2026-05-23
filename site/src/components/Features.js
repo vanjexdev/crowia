@@ -13,9 +13,15 @@ const FEATURES = [
     },
     {
         icon: 'language',
-        title: 'Natural TTS',
-        desc: 'Speaks with piper-tts using the es_ES-davefx-medium voice model. Markdown is stripped automatically so responses sound natural.',
+        title: 'Natural TTS — Local or Cloud',
+        desc: 'Choose from multiple piper-tts voice models (es_ES, es_MX, es_AR) for fully offline speech, or switch to ElevenLabs for studio-quality cloned voices. Markdown is stripped automatically so responses sound natural.',
         color: '#A3D8F4',
+    },
+    {
+        icon: 'stream',
+        title: 'Streaming Responses + Cancel',
+        desc: 'Responses render word-by-word as the LLM streams them. TTS starts speaking the first sentence while the rest is still generating — no waiting for the full reply. Hit Cancel any time to stop mid-stream.',
+        color: '#FFB7C5',
     },
     {
         icon: 'smart_toy',
@@ -24,28 +30,28 @@ const FEATURES = [
         color: '#B5EAD7',
     },
     {
-        icon: 'web',
-        title: 'Web App (PWA)',
-        desc: 'Remote access from any device on your Tailscale VPN. Installable as a PWA on Android or desktop. Voice + text, full TTS.',
-        color: '#FFD700',
-    },
-    {
         icon: 'desktop_windows',
         title: 'Desktop Overlay',
         desc: 'Floating PyQt6 overlay with a two-column QSplitter. Keyboard-driven, transparent, always on top when you need it.',
         color: '#FF9AA2',
     },
     {
+        icon: 'psychology',
+        title: 'Persona & Skills',
+        desc: 'Set the assistant\'s name and gender (male/female) with hot-reload — no restart needed. Enable toggleable skill files like Caveman Mode for ultra-terse responses, or define your own.',
+        color: '#C7CEEA',
+    },
+    {
         icon: 'history',
         title: 'Persistent Memory',
         desc: '3-layer memory system: session history, per-session summaries, and long-term memory injected into every prompt. Giselo remembers context across restarts.',
-        color: '#C7CEEA',
+        color: '#FFDAC1',
     },
     {
         icon: 'devices',
         title: 'Cross-Platform',
         desc: 'Tested on Arch Linux, Ubuntu, Fedora, macOS, and Windows. giselo-doctor auto-configures your environment in seconds.',
-        color: '#FFDAC1',
+        color: '#D4F0A5',
     },
 ];
 

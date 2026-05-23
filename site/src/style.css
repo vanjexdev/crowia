@@ -1,24 +1,24 @@
-/* MD3 Design Tokens */
+/* MD3 Design Tokens — Giselo navy/blue palette */
 :root {
-  --md-primary: #D0BCFF;
-  --md-on-primary: #381E72;
-  --md-primary-container: #4F378B;
-  --md-on-primary-container: #EADDFF;
-  --md-secondary: #CCC2DC;
-  --md-on-secondary: #332D41;
-  --md-secondary-container: #4A4458;
-  --md-on-secondary-container: #E8DEF8;
-  --md-surface: #141218;
-  --md-surface-1: #1D1B20;
-  --md-surface-2: #211F26;
-  --md-surface-3: #2B2930;
-  --md-on-surface: #E6E0E9;
-  --md-on-surface-variant: #CAC4D0;
-  --md-outline: #49454F;
-  --md-outline-variant: #2B2930;
+  --md-primary: #7AB8F5;
+  --md-on-primary: #0a1a3e;
+  --md-primary-container: #1a3a6e;
+  --md-on-primary-container: #C5DEFF;
+  --md-secondary: #8aabcc;
+  --md-on-secondary: #0f2040;
+  --md-secondary-container: #1e3454;
+  --md-on-secondary-container: #D0E4F8;
+  --md-surface: #0a1020;
+  --md-surface-1: #0f1a2e;
+  --md-surface-2: #121f38;
+  --md-surface-3: #1a2a45;
+  --md-on-surface: #cfd6e6;
+  --md-on-surface-variant: #8a9ab8;
+  --md-outline: #2a3a54;
+  --md-outline-variant: #1a2a3e;
   --md-error: #FFB4AB;
-  --md-sys-color-tertiary: #EFB8C8;
-  --md-tonal-spot: #7965AF;
+  --md-sys-color-tertiary: #58d8e8;
+  --md-tonal-spot: #3a7ebf;
 
   --radius-xs: 4px;
   --radius-sm: 8px;
@@ -84,14 +84,14 @@ body {
   background: var(--md-primary-container);
   color: var(--md-on-primary-container);
 }
-.btn-filled:hover { background: #5B438F; transform: translateY(-1px); box-shadow: 0 4px 20px rgba(103,80,164,0.4); }
+.btn-filled:hover { background: #1a4a8a; transform: translateY(-1px); box-shadow: 0 4px 20px rgba(58,158,224,0.4); }
 
 .btn-outlined {
   background: transparent;
   color: var(--md-primary);
   border: 1.5px solid var(--md-outline);
 }
-.btn-outlined:hover { border-color: var(--md-primary); background: rgba(208,188,255,0.08); }
+.btn-outlined:hover { border-color: var(--md-primary); background: rgba(122,184,245,0.08); }
 
 /* Section layout */
 .section {
@@ -105,8 +105,8 @@ body {
   align-items: center;
   gap: 8px;
   padding: 6px 16px;
-  background: rgba(208,188,255,0.1);
-  border: 1px solid rgba(208,188,255,0.2);
+  background: rgba(58,158,224,0.1);
+  border: 1px solid rgba(58,158,224,0.2);
   border-radius: var(--radius-full);
   color: var(--md-primary);
   font-size: 0.8125rem;
@@ -126,9 +126,9 @@ body {
   transition: all 0.25s ease;
 }
 .card:hover {
-  border-color: rgba(208,188,255,0.3);
+  border-color: rgba(58,158,224,0.3);
   transform: translateY(-2px);
-  box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.4);
 }
 
 /* Code block */
@@ -145,7 +145,7 @@ body {
 }
 .code-block .comment { color: #6E7681; }
 .code-block .cmd { color: #79C0FF; }
-.code-block .flag { color: #D2A8FF; }
+.code-block .flag { color: #58d8e8; }
 .code-block .str { color: #A5D6FF; }
 
 /* Chip */
@@ -165,7 +165,7 @@ body {
 .mockup-phone {
   width: 200px;
   height: 420px;
-  background: linear-gradient(160deg, #1a1830 0%, #0e0c16 100%);
+  background: linear-gradient(160deg, #0d1a2e 0%, #080e1c 100%);
   border-radius: 36px;
   border: 2px solid rgba(255,255,255,0.12);
   padding: 14px 10px 20px;
@@ -192,7 +192,7 @@ body {
 .mockup-phone-screen {
   flex: 1;
   width: 100%;
-  background: #141218;
+  background: #080e1c;
   border-radius: 24px;
   overflow: hidden;
   position: relative;
@@ -212,7 +212,7 @@ body {
 }
 
 .mockup-laptop-lid {
-  background: linear-gradient(160deg, #1a1830 0%, #0e0c16 100%);
+  background: linear-gradient(160deg, #0d1a2e 0%, #080e1c 100%);
   border-radius: 12px 12px 0 0;
   padding: 10px 10px 0;
   border: 2px solid rgba(255,255,255,0.12);
@@ -223,7 +223,7 @@ body {
 }
 
 .mockup-laptop-display {
-  background: #141218;
+  background: #080e1c;
   border-radius: 6px;
   aspect-ratio: 16/10;
   overflow: hidden;
@@ -239,7 +239,7 @@ body {
 
 .mockup-laptop-base {
   height: 18px;
-  background: linear-gradient(180deg, #252338 0%, #1a1830 100%);
+  background: linear-gradient(180deg, #0f1d38 0%, #0c1428 100%);
   border-radius: 0 0 4px 4px;
   border: 2px solid rgba(255,255,255,0.1);
   border-top: 1px solid rgba(255,255,255,0.06);
@@ -254,7 +254,7 @@ body {
   transform: translateX(-50%);
   width: 45%;
   height: 8px;
-  background: linear-gradient(180deg, #1a1830 0%, #12101e 100%);
+  background: linear-gradient(180deg, #0c1428 0%, #080e1c 100%);
   border-radius: 0 0 6px 6px;
   border: 2px solid rgba(255,255,255,0.08);
   border-top: none;

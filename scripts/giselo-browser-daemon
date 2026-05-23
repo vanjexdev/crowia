@@ -1,4 +1,4 @@
-#!/home/jesusu/Workspace/agents/crowia/.venv/bin/python3
+#!/usr/bin/env python3
 """
 giselo-browser-daemon [--browser firefox|chromium|chrome]
 Persistent browser via Playwright. Listens on Unix socket.
