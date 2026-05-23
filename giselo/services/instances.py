@@ -102,6 +102,7 @@ class InstanceService(QObject):
         if self._busy:
             log.warning("Already processing — ignoring ask")
             return
+        self._inject_backend_name(self._cfg.get("backend", "claude"))
 
         mem_svc.add_user(text)
         history = mem_svc.get_messages()[:-1]  # exclude the message we just added

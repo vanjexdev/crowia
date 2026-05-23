@@ -3,7 +3,7 @@ from PyQt6.QtCore import QPropertyAnimation, QEasingCurve, pyqtSignal, Qt, QSize
 from giselo.app.theme import ACCENT_DEFAULT
 
 
-DRAWER_WIDTH = 280
+DRAWER_WIDTH = 320
 
 
 class Drawer(QWidget):
