@@ -53,8 +53,21 @@ class _StreamingTTSWorker(QThread):
     def run(self) -> None:
         from crowia.output import StreamingTTSPlayer
         is_piper = bool(self._tts_cmd) and "piper" in pathlib.Path(self._tts_cmd[0]).name
+        use_elevenlabs = (
+            getattr(self._handler, "el_enabled", False)
+            and getattr(self._handler, "el_api_key", "")
+            and getattr(self._handler, "el_voice_id", "")
+        )
         try:
-            if is_piper and sys.platform == "linux":
+            if use_elevenlabs:
+                # Speak each sentence individually via ElevenLabs
+                while True:
+                    sentence = self._queue.get()
+                    if sentence is None:
+                        break
+                    if sentence.strip():
+                        self._handler._speak(sentence)
+            elif is_piper and sys.platform == "linux":
                 self._player = StreamingTTSPlayer(self._tts_cmd)
                 while True:
                     sentence = self._queue.get()
@@ -63,7 +76,6 @@ class _StreamingTTSWorker(QThread):
                     self._player.write(sentence)
                 self._player.finish()
             else:
-                # Non-Linux or non-piper: collect all sentences then speak at once
                 sentences: list[str] = []
                 while True:
                     s = self._queue.get()
