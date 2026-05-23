@@ -282,6 +282,23 @@ def build(layout: QVBoxLayout) -> None:
 
     _sep(layout)
 
+    # ── Skills ───────────────────────────────────────────────────────────────
+    _section_title(layout, "Skills")
+    _skills_dir = pathlib.Path(__file__).parents[2] / "skills"
+    _available_skills = sorted(p.stem for p in _skills_dir.glob("*.md")) if _skills_dir.exists() else []
+    _enabled_skills = list(cfg.get("skills", {}).get("enabled", []))
+    skill_checks: dict[str, QCheckBox] = {}
+    for sk in _available_skills:
+        cb = QCheckBox(sk)
+        cb.setChecked(sk in _enabled_skills)
+        cb.setStyleSheet(
+            f"color: {INK}; font-size: 10px; font-family: 'JetBrains Mono', monospace;"
+        )
+        layout.insertWidget(layout.count() - 1, cb)
+        skill_checks[sk] = cb
+
+    _sep(layout)
+
     # ── Backend (instancia activa) ────────────────────────────────────────────
     from giselo.app.state import state
     instance = state.active_instance
@@ -383,6 +400,11 @@ def build(layout: QVBoxLayout) -> None:
                 cfg["codex"]["working_dir"] = backend_widgets["cx_workdir"].text().strip()
             elif backend == "opencode":
                 cfg["opencode"]["model"] = backend_widgets["oc_model"].text().strip()
+
+            # Update enabled skills
+            if "skills" not in cfg:
+                cfg["skills"] = {}
+            cfg["skills"]["enabled"] = [sk for sk, cb in skill_checks.items() if cb.isChecked()]
 
             _save(cfg)
             status_lbl.setStyleSheet(f"color: {LIME}; font-size: 10px; font-family: 'JetBrains Mono', monospace;")
