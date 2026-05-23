@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import pathlib
@@ -76,6 +77,7 @@ class ClaudeCliBackend(Backend):
             "--add-dir", str(pathlib.Path.home()),
             "--allowedTools", self._allowed_tools,
             "--disallowedTools", self._disallowed_tools,
+            "--output-format", "stream-json",
         ]
 
         env = os.environ.copy()
@@ -98,29 +100,77 @@ class ClaudeCliBackend(Backend):
             log.debug("Claude CLI started (pid=%d)", self._proc.pid)
 
             accumulated = ""
-            _chunk_threshold = 0
-            stderr_data = ""
+            stderr_lines: list[str] = []
+
+            # Drain stderr in background to prevent pipe deadlock
+            def _drain_stderr():
+                try:
+                    for line in self._proc.stderr:
+                        stderr_lines.append(line)
+                except Exception:
+                    pass
+            stderr_thread = threading.Thread(target=_drain_stderr, daemon=True)
+            stderr_thread.start()
 
             if on_chunk:
-                # Streaming: read stdout incrementally
-                while True:
+                # stream-json: each stdout line is a JSON event, flushed by the CLI
+                # immediately — reliable streaming regardless of pipe buffering
+                for raw in self._proc.stdout:
+                    raw = raw.strip()
+                    if not raw:
+                        continue
                     try:
-                        chunk = self._proc.stdout.read(32)
-                    except (OSError, ValueError):
-                        break
-                    if not chunk:
-                        break
-                    accumulated += chunk
-                    # Emit on_chunk at word boundaries or every ~60 chars
-                    if len(accumulated) >= _chunk_threshold + 60 or chunk.endswith((" ", "\n")):
-                        on_chunk(accumulated)
-                        _chunk_threshold = len(accumulated)
-                self._proc.stdout.close()
-                stderr_data = self._proc.stderr.read()
-                self._proc.wait(timeout=10)
+                        event = json.loads(raw)
+                    except json.JSONDecodeError:
+                        log.debug("non-json stdout: %s", raw[:80])
+                        continue
+
+                    ev_type = event.get("type", "")
+
+                    if ev_type == "assistant":
+                        msg = event.get("message", {})
+                        for block in msg.get("content", []):
+                            if not isinstance(block, dict):
+                                continue
+                            btype = block.get("type", "")
+                            if btype == "text":
+                                text = block.get("text", "")
+                                if not text:
+                                    continue
+                                # stream-json sends accumulated text per event
+                                if text.startswith(accumulated):
+                                    accumulated = text  # accumulated format
+                                else:
+                                    accumulated += text  # delta format
+                                on_chunk(accumulated)
+                            elif btype == "text_delta":
+                                delta = block.get("text", "")
+                                if delta:
+                                    accumulated += delta
+                                    on_chunk(accumulated)
+
+                    elif ev_type == "result":
+                        result = event.get("result", "")
+                        if result:
+                            accumulated = result
+
             else:
-                stdout_data, stderr_data = self._proc.communicate(timeout=timeout)
-                accumulated = stdout_data
+                stdout_data, _ = self._proc.communicate(timeout=timeout)
+                # stdout may be stream-json too; extract result event if so
+                for raw in stdout_data.splitlines():
+                    raw = raw.strip()
+                    if not raw:
+                        continue
+                    try:
+                        event = json.loads(raw)
+                        if event.get("type") == "result":
+                            accumulated = event.get("result", accumulated)
+                    except json.JSONDecodeError:
+                        accumulated += raw + "\n"
+
+            stderr_thread.join(timeout=5)
+            stderr_data = "".join(stderr_lines)
+            self._proc.wait(timeout=10)
 
             rc = self._proc.returncode
             log.debug("Claude CLI finished (rc=%d, out_len=%d)", rc, len(accumulated))
