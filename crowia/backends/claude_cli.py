@@ -78,6 +78,7 @@ class ClaudeCliBackend(Backend):
             "--allowedTools", self._allowed_tools,
             "--disallowedTools", self._disallowed_tools,
             "--output-format", "stream-json",
+            "--verbose",
         ]
 
         env = os.environ.copy()
