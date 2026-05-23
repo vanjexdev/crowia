@@ -1,6 +1,6 @@
 import pathlib
 from ruamel.yaml import YAML
-from PyQt6.QtWidgets import (QLabel, QVBoxLayout, QHBoxLayout, QComboBox,
+from PyQt6.QtWidgets import (QLabel, QVBoxLayout, QHBoxLayout,
                               QCheckBox, QLineEdit, QPushButton, QFrame,
                               QWidget, QSpinBox, QRadioButton, QButtonGroup)
 from PyQt6.QtCore import Qt
@@ -238,30 +238,8 @@ def build(layout: QVBoxLayout) -> None:
     mic_devices = _list_input_devices()
     current_mic = cfg.get("audio", {}).get("monitor_device", "default")
 
-    _combo_style = f"""
-        QComboBox {{
-            background: rgba(15,26,46,0.8); color: {INK};
-            border: 1px solid rgba(93,107,133,0.4); border-radius: 4px;
-            font-size: 10px; font-family: 'JetBrains Mono', monospace;
-            padding: 2px 6px;
-        }}
-        QComboBox::drop-down {{ border: none; width: 16px; }}
-        QComboBox QAbstractItemView {{
-            background: #0f1a2e; color: {INK};
-            selection-background-color: rgba(136,201,58,0.15);
-        }}
-    """
-    mic_combo = QComboBox()
-    mic_combo.setStyleSheet(_combo_style)
-    mic_combo.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-    mic_combo.setMaximumWidth(200)
-    for display, key in mic_devices:
-        mic_combo.addItem(display, userData=key)
-    for i in range(mic_combo.count()):
-        if mic_combo.itemData(i) == current_mic:
-            mic_combo.setCurrentIndex(i)
-            break
-    _add_row(layout, "dispositivo", mic_combo)
+    mic_w, get_mic = _radio_v(mic_devices, current_mic)
+    _add_row(layout, "dispositivo", mic_w)
 
     _sep(layout)
 
@@ -408,7 +386,7 @@ def build(layout: QVBoxLayout) -> None:
         try:
             if "audio" not in cfg:
                 cfg["audio"] = {}
-            cfg["audio"]["monitor_device"] = mic_combo.currentData()
+            cfg["audio"]["monitor_device"] = get_mic()
             cfg["output"]["tts_enabled"] = tts_toggle.isChecked()
 
             # Update tts_command model path
