@@ -39,6 +39,8 @@ class _AskWorker(QObject):
             )
             if not self._cancelled:
                 self.done.emit(full)
+            else:
+                self.error.emit("cancelado")
         except Exception as exc:
             log.exception("Ask worker error: %s", exc)
             self.error.emit(str(exc))

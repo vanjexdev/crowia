@@ -227,7 +227,7 @@ class OutputHandler:
                 model_id=self.el_model_id,
             )
             proc = subprocess.Popen(
-                ["mpv", "--no-terminal", "--demuxer=lavf", "-"],
+                ["mpv", "--no-terminal", "--demuxer-lavf-format=mp3", "-"],
                 stdin=subprocess.PIPE,
                 stderr=subprocess.DEVNULL,
             )
