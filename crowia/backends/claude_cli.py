@@ -114,9 +114,15 @@ class ClaudeCliBackend(Backend):
             stderr_thread.start()
 
             if on_chunk:
-                # stream-json: each stdout line is a JSON event, flushed by the CLI
-                # immediately — reliable streaming regardless of pipe buffering
-                for raw in self._proc.stdout:
+                # stream-json: each stdout line is a JSON event.
+                # Use buffer_size=1 so readline() blocks at each byte — if the CLI
+                # flushes events progressively, we receive them one by one.
+                import io as _io
+                _stdout = _io.TextIOWrapper(
+                    _io.BufferedReader(self._proc.stdout.raw, buffer_size=1),
+                    encoding="utf-8", errors="replace",
+                )
+                for raw in _stdout:
                     raw = raw.strip()
                     if not raw:
                         continue

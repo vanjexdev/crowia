@@ -153,12 +153,27 @@ class StreamChatArea(QWidget):
     def finish_response(self, text: str, ts: str) -> None:
         self._render_timer.stop()
         self._pending_text = ""
-        if self._active:
-            self._active.set_tool(None)
-            self._active.set_text(text, ts)
-        self._active = None
+        if not self._active:
+            self._scroll_bottom()
+            return
+        self._active.set_tool(None)
+        # Determine how much is already visible — animate only the new part
+        already = len(self._active._body.text())
+        if already == 0 or already == 3:  # "..." placeholder
+            already = 0
+        bubble = self._active
+        self._active = None  # release before animation
+        self._typewrite(bubble, text, ts, already)
+
+    def _typewrite(self, bubble: "_Bubble", full: str, ts: str, pos: int = 0) -> None:
+        STEP = 8   # chars per tick
+        DELAY = 28  # ms between ticks (~36fps feel)
+        pos = min(pos + STEP, len(full))
+        bubble.set_text(full[:pos], ts if pos == len(full) else None)
         self._content.updateGeometry()
         self._scroll_bottom()
+        if pos < len(full):
+            QTimer.singleShot(DELAY, lambda: self._typewrite(bubble, full, ts, pos))
 
     def error_response(self, msg: str) -> None:
         self.finish_response(f"⚠ {msg}", _now())
