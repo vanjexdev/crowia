@@ -4,7 +4,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QScrollArea,
     QLabel, QFrame, QSizePolicy
 )
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from giselo.app.theme import ORANGE, CYAN, MUTE, INK
 
 _TOOL_RE = re.compile(r'[⏺●]\s*(\w+)\(')
@@ -70,6 +70,9 @@ class _Bubble(QFrame):
         self._body.setText(text)
         if ts:
             self._ts.setText(ts)
+        # Force layout to recompute word-wrapped height
+        self._body.updateGeometry()
+        self.updateGeometry()
 
     def set_tool(self, name: str | None) -> None:
         if name:
@@ -110,6 +113,10 @@ class StreamChatArea(QWidget):
         root.addWidget(scroll, stretch=1)
 
         self._active: _Bubble | None = None
+        self._pending_text: str = ""
+        self._render_timer = QTimer(self)
+        self._render_timer.setInterval(33)  # ~30fps cap
+        self._render_timer.timeout.connect(self._flush_render)
 
     # ── Public API ─────────────────────────────────────────────────────────────
 
@@ -120,23 +127,37 @@ class StreamChatArea(QWidget):
 
     def begin_response(self, ts: str) -> None:
         b = _Bubble("giselo", is_user=False, parent=self._content)
-        b.set_text("...", ts)
+        b.set_text("", ts)
         self._insert(b)
         self._active = b
+        self._pending_text = ""
 
     def update_response(self, text: str) -> None:
         if not self._active:
             return
+        self._pending_text = text
+        if not self._render_timer.isActive():
+            self._render_timer.start()
+
+    def _flush_render(self) -> None:
+        if not self._active or not self._pending_text:
+            self._render_timer.stop()
+            return
+        text, self._pending_text = self._pending_text, ""
         tools = _TOOL_RE.findall(text)
         self._active.set_tool(tools[-1] if tools else None)
         self._active.set_text(text)
+        self._content.updateGeometry()
         self._scroll_bottom()
 
     def finish_response(self, text: str, ts: str) -> None:
+        self._render_timer.stop()
+        self._pending_text = ""
         if self._active:
             self._active.set_tool(None)
             self._active.set_text(text, ts)
         self._active = None
+        self._content.updateGeometry()
         self._scroll_bottom()
 
     def error_response(self, msg: str) -> None:
