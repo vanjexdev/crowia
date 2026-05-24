@@ -12,7 +12,7 @@ audio:
   tmp_dir: /tmp/crowia
   monitor_device: 'sof-hda-dsp: - (hw:2,7)'
 whisper:
-  model: large
+  model: medium
   language: es
   device: cpu
   compute_type: int8
@@ -21,7 +21,7 @@ whisper:
     terminal, busca, qué es, cómo se hace, mira la pantalla, sube el volumen, 
     baja el volumen.
 claude:
-  model: claude-sonnet-4-6
+  model: claude-haiku-4-5
   api_key: ""
   system_prompt: 'Tu nombre es Giselo. NUNCA te identifiques como Claude, Anthropic,
     ni ningún otro nombre — siempre eres Giselo. Si alguien pregunta quién eres, di
@@ -79,7 +79,7 @@ codex:
   sandbox: danger-full-access
   working_dir: ""
 opencode:
-  model: opencode-go/minimax-m2.7
+  model: opencode/big-pickle
 always_on:
   wake_phrases:
   - oye giselo
@@ -101,7 +101,7 @@ output:
   tts_command:
   - piper-tts
   - --model
-  - /home/jesusu/.local/share/piper/es_AR-daniela-high.onnx
+  - /home/jesusu/.local/share/piper/es_MX-claude-high.onnx
   - --output_raw
   response_width: 600
   response_height: 420
@@ -119,9 +119,9 @@ profiles:
     context: "Modo de trabajo PDM activado. El navegador preferido para este proyecto
       es Floorp. Cuando el usuario pida abrir el navegador, usa Floorp."
 assistant:
-  gender: male
+  gender: female
   name_male: Giselo
-  name_female: Giseth
+  name_female: Gisela
 elevenlabs:
   enabled: false
   api_key: 'sk_69ce973f1f41fea1130b2f6f24ede0064bee503108563a56'
@@ -136,3 +136,12 @@ skills:
   - remind
 ui:
   accent: "#88c93a"
+instances:
+  list:
+  - opencode
+  - claude
+  - codex
+  backends:
+    opencode: opencode
+    claude: claude
+    codex: codex

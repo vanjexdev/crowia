@@ -1,5 +1,6 @@
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-                              QSizePolicy, QApplication, QFrame, QPushButton)
+                              QSizePolicy, QApplication, QFrame, QPushButton,
+                              QStackedWidget)
 from PyQt6.QtCore import Qt, QSize
 from PyQt6.QtGui import QColor
 
@@ -55,6 +56,8 @@ class MainWindow(QMainWindow):
 
         self._fullscreen = False
         self._drawers: dict[str, Drawer] = {}
+        # Maps instance name → context name (usually same; shared if user chose to link)
+        self._context_map: dict[str, str] = {n: n for n in state.INSTANCES}
         self._response_buf = ""
         self._sentence_buf = ""
         self._tts_streaming = False
@@ -180,8 +183,16 @@ class MainWindow(QMainWindow):
         self._cancel_bar.hide()
         center_layout.addWidget(self._cancel_bar)
 
-        self._stream_chat = StreamChatArea()
-        center_layout.addWidget(self._stream_chat)
+        self._chats: dict[str, StreamChatArea] = {}
+        self._stacked_chat = QStackedWidget()
+        for name in state.INSTANCES:
+            chat = StreamChatArea()
+            self._chats[name] = chat
+            self._stacked_chat.addWidget(chat)
+        active = state.active_instance
+        self._stream_chat = self._chats.get(active, next(iter(self._chats.values())))
+        self._stacked_chat.setCurrentWidget(self._stream_chat)
+        center_layout.addWidget(self._stacked_chat)
 
         self._input_bar = InputBar()
         center_layout.addWidget(self._input_bar)
@@ -228,7 +239,7 @@ class MainWindow(QMainWindow):
 
         self._rail_left.setVisible(is_compact)
         self._rail_right.setVisible(is_compact)
-        self._stream_chat.setVisible(is_compact)
+        self._stacked_chat.setVisible(is_compact)
         self._cancel_bar.setVisible(is_compact and self._svc.busy if hasattr(self, '_svc') else False)
         self._input_bar.set_compact(is_min)
 
@@ -342,11 +353,15 @@ class MainWindow(QMainWindow):
     def switch_instance(self, name: str) -> None:
         from giselo.services import memory as mem_svc
         state.active_instance = name
-        mem_svc.set_active(name)
+        mem_svc.set_active(self._context_map.get(name, name))
         self._tab_dock.set_active(name)
         self._status_bar.set_instance(name)
         backend = state.INSTANCE_BACKENDS.get(name, "claude")
         self._svc.switch_backend(backend)
+        # Switch chat view to this instance
+        if name in self._chats:
+            self._stream_chat = self._chats[name]
+            self._stacked_chat.setCurrentWidget(self._stream_chat)
         notif.push(f"Instancia: {name} ({backend})", "info")
         self._refresh_drawer_if_open("config")
 
@@ -367,8 +382,30 @@ class MainWindow(QMainWindow):
         )
         if not ok2:
             return
+        # Ask: fresh context or share with existing?
+        ctx_options = ["Nuevo contexto"] + list(state.INSTANCES)
+        ctx_choice, ok3 = QInputDialog.getItem(
+            self, "Contexto", f"Contexto para '{name}':",
+            ctx_options, 0, False
+        )
+        if not ok3:
+            return
+
         state.INSTANCES = list(state.INSTANCES) + [name]
         state.INSTANCE_BACKENDS[name] = backend
+        from giselo.app.state import save_instances
+        save_instances(state.INSTANCES, state.INSTANCE_BACKENDS)
+
+        if ctx_choice == "Nuevo contexto":
+            chat = StreamChatArea()
+            self._chats[name] = chat
+            self._stacked_chat.addWidget(chat)
+            self._context_map[name] = name
+        else:
+            # Share chat widget and history of the chosen instance
+            self._chats[name] = self._chats[ctx_choice]
+            self._context_map[name] = self._context_map.get(ctx_choice, ctx_choice)
+
         self._tab_dock.add_instance(name)
         self.switch_instance(name)
         notif.push(f"Instancia '{name}' ({backend}) creada", "ok")
