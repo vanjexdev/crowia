@@ -14,6 +14,7 @@ class TabDock(QWidget):
     instance_changed       = pyqtSignal(str)
     instance_add_requested = pyqtSignal()
     config_requested       = pyqtSignal(str)
+    delete_requested       = pyqtSignal(str)
 
     def __init__(self, instances: list[str], active: str, parent=None):
         super().__init__(parent)
@@ -65,6 +66,9 @@ class TabDock(QWidget):
         menu.addAction("⚙  Configurar").triggered.connect(
             lambda: self.config_requested.emit(name)
         )
+        menu.addSeparator()
+        act_del = menu.addAction("✕  Eliminar")
+        act_del.triggered.connect(lambda: self.delete_requested.emit(name))
         menu.exec(btn.mapToGlobal(pos))
 
     def add_instance(self, name: str) -> None:
@@ -73,6 +77,12 @@ class TabDock(QWidget):
         layout = self.layout()
         layout.insertWidget(layout.count() - 2, btn)
         self.set_active(name)
+
+    def remove_instance(self, name: str) -> None:
+        btn = self._buttons.pop(name, None)
+        if btn:
+            self.layout().removeWidget(btn)
+            btn.deleteLater()
 
     def set_active(self, name: str) -> None:
         for inst, btn in self._buttons.items():

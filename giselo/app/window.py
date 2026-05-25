@@ -224,6 +224,7 @@ class MainWindow(QMainWindow):
         self._tab_dock.instance_changed.connect(self.switch_instance)
         self._tab_dock.instance_add_requested.connect(self._on_add_instance)
         self._tab_dock.config_requested.connect(self._on_instance_config)
+        self._tab_dock.delete_requested.connect(self._on_delete_instance)
         self._rail_left.drawer_toggled.connect(self.toggle_drawer)
         self._rail_right.action_triggered.connect(self._on_rail_right)
         self._input_bar.message_submitted.connect(self._on_message)
@@ -453,6 +454,40 @@ class MainWindow(QMainWindow):
         self._tab_dock.add_instance(name)
         self.switch_instance(name)
         notif.push(f"Instancia '{name}' ({backend}) creada", "ok")
+
+    def _on_delete_instance(self, name: str) -> None:
+        from PyQt6.QtWidgets import QMessageBox
+        if len(state.INSTANCES) <= 1:
+            QMessageBox.warning(self, "Eliminar instancia", "No se puede eliminar la última instancia")
+            return
+        if name not in state.INSTANCES:
+            return
+        reply = QMessageBox.question(
+            self, "Eliminar instancia", f"¿Eliminar instancia '{name}'?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        state.INSTANCES = [i for i in state.INSTANCES if i != name]
+        state.INSTANCE_BACKENDS.pop(name, None)
+        from giselo.app.state import save_instances
+        save_instances(state.INSTANCES, state.INSTANCE_BACKENDS)
+        svc = self._services.pop(name, None)
+        svc and svc.cancel()
+        self._response_bufs.pop(name, None)
+        self._sentence_bufs.pop(name, None)
+        if self._context_map.get(name) == name:
+            chat = self._chats.pop(name, None)
+            if chat:
+                self._stacked_chat.removeWidget(chat)
+                chat.deleteLater()
+        else:
+            self._chats.pop(name, None)
+        self._context_map.pop(name, None)
+        if state.active_instance == name:
+            self.switch_instance(state.INSTANCES[0])
+        self._tab_dock.remove_instance(name)
+        notif.push(f"Instancia '{name}' eliminada", "info")
 
     def toggle_drawer(self, name: str) -> None:
         if state.active_drawer == name and self._drawer.is_open():

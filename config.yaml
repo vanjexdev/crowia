@@ -106,7 +106,7 @@ output:
   tts_command:
   - piper-tts
   - --model
-  - /home/jesusu/.local/share/piper/es_MX-claude-high.onnx
+  - /home/jesusu/.local/share/piper/es_AR-daniela-high.onnx
   - --output_raw
   response_width: 600
   response_height: 420
@@ -138,8 +138,8 @@ skills:
   - browser
   - cachyos-kde
   - google
-  - remind
   - morning_digest
+  - remind
 ui:
   accent: "#3a9ee0"
 instances:
@@ -150,6 +150,8 @@ instances:
   - Opencode Free
   - Opencode Premium
   - Gemini Own
+  - Gemini API
+  - OpenRouter
   backends:
     opencode: opencode
     claude: claude
@@ -157,4 +159,13 @@ instances:
     Opencode Free: opencode
     Opencode Premium: opencode
     Gemini Own: gemini
-  config: {}
+    Gemini API: gemini
+    OpenRouter: openrouter
+  config:
+    OpenRouter:
+      api_key: ""
+      model: google/gemini-2.0-flash-exp:free
+    Gemini API:
+      api_key: AIzaSyDvVev7A364wMc3mHKPK-DyTYbaB4kOUjA
+      base_url: 
+        https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent
