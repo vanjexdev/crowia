@@ -480,7 +480,7 @@ class MainWindow(QMainWindow):
         # Delay: speaker hardware buffer may still be playing ~500-800ms after
         # piper/aplay signal done. Without delay, mic captures TTS output.
         from PyQt6.QtCore import QTimer
-        QTimer.singleShot(1200, self._resume_always_on)
+        QTimer.singleShot(2000, self._resume_always_on)
 
     # ── Voice slots ───────────────────────────────────────────────────────────
 

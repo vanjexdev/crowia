@@ -56,19 +56,21 @@ class _AlwaysOnStream(threading.Thread):
         min_speech_frames  = self._min_speech_ms // frame_ms
         max_silence_frames = self._silence_ms // frame_ms
         max_frames         = int(self._max_sec * 1000 / frame_ms)
+        # Warmup: discard first 500ms — may contain speaker echo / TTS tail
+        warmup_frames      = 500 // frame_ms
 
         # State
         frames_buf      = b""          # raw bytes accumulator for 20ms chunks
         recorded_chunks = []           # list of 20ms byte chunks (captured speech)
+        frames_total    = 0            # total 20ms frames processed
         speech_frames   = 0
         silence_frames  = 0
         consec_speech   = 0
         had_speech      = False
         done            = False
-        start_time      = time.monotonic()
 
         def _cb(indata, n_frames, _time, status):
-            nonlocal frames_buf, recorded_chunks
+            nonlocal frames_buf, recorded_chunks, frames_total
             nonlocal speech_frames, silence_frames, consec_speech, had_speech, done
 
             if done or self._stop_ev.is_set():
@@ -84,8 +86,13 @@ class _AlwaysOnStream(threading.Thread):
 
             while len(frames_buf) >= frame_bytes:
                 chunk, frames_buf = frames_buf[:frame_bytes], frames_buf[frame_bytes:]
+                frames_total += 1
 
-                # Always accumulate — we keep pre-speech and speech frames
+                # Discard first warmup_frames — absorbs TTS speaker echo
+                if frames_total <= warmup_frames:
+                    continue
+
+                # Accumulate post-warmup frames
                 recorded_chunks.append(chunk)
 
                 # Hard cap
