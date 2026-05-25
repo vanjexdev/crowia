@@ -89,7 +89,7 @@ always_on:
   - giselo
   vad_aggressiveness: 2
   silence_duration_ms: 1500
-  min_speech_ms: 400
+  min_speech_ms: 600
   max_record_seconds: 120
 history:
   enabled: true

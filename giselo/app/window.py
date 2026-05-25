@@ -506,10 +506,12 @@ class MainWindow(QMainWindow):
                 wake_words = self._get_wake_words()
                 clean, triggered = self._check_wake_word(text, wake_words)
                 if not triggered:
-                    log.debug("Always-on: no wake word in '%s', resuming", text[:40])
-                    self._giselo_core.set_pill_text("● ESCUCHANDO · LVL 0%")
+                    log.info("Always-on: no wake word in %r, resuming", text[:60])
+                    preview = text[:30] if text.strip() else "(vacío)"
+                    self._giselo_core.set_pill_text(f"● oí: {preview}")
                     from PyQt6.QtCore import QTimer
-                    QTimer.singleShot(300, self._resume_always_on)
+                    QTimer.singleShot(2000, lambda: self._giselo_core.set_pill_text("● ESCUCHANDO · LVL 0%"))
+                    QTimer.singleShot(2200, self._resume_always_on)
                     return
                 text = clean
                 if not text.strip():
