@@ -1,110 +1,185 @@
 import logging
 import pathlib
 import threading
+import time
+import wave
 import numpy as np
 from PyQt6.QtCore import QObject, QThread, QTimer, pyqtSignal
 
 log = logging.getLogger(__name__)
 
 
-class _VADThread(threading.Thread):
-    """Monitors mic via webrtcvad; calls on_silence() after sustained silence following speech."""
+class _AlwaysOnStream(threading.Thread):
+    """Single sounddevice stream: VAD + recording + level in one callback.
 
-    def __init__(self, on_silence, rate: int = 16000,
-                 silence_ms: int = 1000, min_speech_ms: int = 400,
-                 aggressiveness: int = 2, device: str | None = None):
+    No arecord subprocess. No device conflicts. Captures frames, runs webrtcvad,
+    accumulates speech into memory, writes WAV when silence detected.
+    """
+
+    def __init__(self, cfg: dict, on_audio_ready, on_level, on_silence_fired):
         super().__init__(daemon=True)
-        self._on_silence     = on_silence
-        self._rate           = rate
-        self._silence_ms     = silence_ms
-        self._min_speech_ms  = min_speech_ms
-        self._aggressiveness = aggressiveness
-        self._device, self._pulse_source = _sd_device(device)
-        self._stop_ev        = threading.Event()
+        ao             = cfg.get("always_on", {})
+        audio_cfg      = cfg.get("audio", {})
+        self._rate     = audio_cfg.get("rate", 16000)
+        self._silence_ms   = ao.get("silence_duration_ms", 1500)
+        self._min_speech_ms = ao.get("min_speech_ms", 600)
+        self._aggressiveness = ao.get("vad_aggressiveness", 2)
+        self._max_sec  = ao.get("max_record_seconds", 120)
+        cfg_device     = audio_cfg.get("monitor_device") or audio_cfg.get("device", "default")
+        self._sd_device, self._pulse_source = _sd_device(cfg_device)
+        self._on_audio_ready  = on_audio_ready   # callback(wav_path: Path)
+        self._on_level        = on_level          # callback(level: int)
+        self._on_silence_fired = on_silence_fired # callback() — so VoiceService knows
+        self._stop_ev  = threading.Event()
+        self._tmp_dir  = pathlib.Path(audio_cfg.get("tmp_dir", "/tmp/crowia"))
+
+    def stop(self) -> None:
+        self._stop_ev.set()
 
     def run(self) -> None:
+        import os
         try:
             import webrtcvad
             import sounddevice as sd
         except ImportError as e:
-            log.warning("VAD unavailable: %s", e)
+            log.error("AlwaysOnStream deps missing: %s", e)
             return
+
+        if self._pulse_source:
+            os.environ["PULSE_SOURCE"] = self._pulse_source
 
         vad = webrtcvad.Vad(self._aggressiveness)
         frame_ms      = 20
-        frame_samples = self._rate * frame_ms // 1000      # 320 @ 16kHz
-        frame_bytes   = frame_samples * 2                  # int16 = 2 bytes/sample
+        frame_samples = self._rate * frame_ms // 1000   # 320 samples @ 16kHz
+        frame_bytes   = frame_samples * 2               # int16
 
-        min_speech_frames = self._min_speech_ms // frame_ms
+        min_speech_frames  = self._min_speech_ms // frame_ms
         max_silence_frames = self._silence_ms // frame_ms
+        max_frames         = int(self._max_sec * 1000 / frame_ms)
 
-        speech_frames  = 0
-        silence_frames = 0
-        had_speech     = False
-        triggered      = False
-        buf            = b""  # accumulate until we have a full 20ms chunk
-        consec_speech  = 0    # consecutive speech frames after had_speech (noise filter)
+        # State
+        frames_buf      = b""          # raw bytes accumulator for 20ms chunks
+        recorded_chunks = []           # list of 20ms byte chunks (captured speech)
+        speech_frames   = 0
+        silence_frames  = 0
+        consec_speech   = 0
+        had_speech      = False
+        done            = False
+        start_time      = time.monotonic()
 
-        def _cb(indata, frames, _time, _status):
-            nonlocal speech_frames, silence_frames, had_speech, triggered, buf, consec_speech
-            if triggered or self._stop_ev.is_set():
-                return
-            # Flatten to mono int16 bytes regardless of device block size
+        def _cb(indata, n_frames, _time, status):
+            nonlocal frames_buf, recorded_chunks
+            nonlocal speech_frames, silence_frames, consec_speech, had_speech, done
+
+            if done or self._stop_ev.is_set():
+                raise sd.CallbackStop()
+
+            # Level meter (fast path, no VAD needed)
+            rms = float(np.sqrt(np.mean(indata.astype(np.float32) ** 2)))
+            level = min(100, int(rms * 600))
+            self._on_level(level)
+
             mono = indata[:, 0] if indata.ndim > 1 else indata.ravel()
-            buf += mono.astype(np.int16).tobytes()
-            # Process as many complete 20ms frames as available
-            while len(buf) >= frame_bytes and not triggered:
-                chunk, buf = buf[:frame_bytes], buf[frame_bytes:]
+            frames_buf += mono.astype(np.int16).tobytes()
+
+            while len(frames_buf) >= frame_bytes:
+                chunk, frames_buf = frames_buf[:frame_bytes], frames_buf[frame_bytes:]
+
+                # Always accumulate — we keep pre-speech and speech frames
+                recorded_chunks.append(chunk)
+
+                # Hard cap
+                if len(recorded_chunks) >= max_frames:
+                    log.info("AlwaysOnStream: max_record_seconds reached, stopping")
+                    done = True
+                    self._stop_ev.set()
+                    raise sd.CallbackStop()
+
                 try:
                     is_speech = vad.is_speech(chunk, self._rate)
-                except Exception as e:
-                    log.debug("VAD frame skip: %s", e)
+                except Exception:
                     continue
+
                 if is_speech:
                     speech_frames += 1
                     if speech_frames >= min_speech_frames:
                         had_speech = True
                     if had_speech:
                         consec_speech += 1
-                        # Only reset silence counter if sustained re-speech (>80ms),
-                        # not a noise blip (1-3 frames = 20-60ms)
-                        if consec_speech > 4:
+                        if consec_speech > 4:   # >80ms sustained — real re-speech
                             silence_frames = 0
                 else:
                     consec_speech = 0
                     if had_speech:
                         silence_frames += 1
                         if silence_frames >= max_silence_frames:
-                            triggered = True
+                            log.info("AlwaysOnStream: silence detected after speech")
+                            done = True
                             self._stop_ev.set()
-                            self._on_silence()
+                            raise sd.CallbackStop()
 
-        import os
-        if self._pulse_source:
-            os.environ["PULSE_SOURCE"] = self._pulse_source
         try:
-            # blocksize=0 lets the device choose its natural frame size;
-            # we buffer internally to always feed webrtcvad exact 20ms chunks
-            devices = [self._device]
-            if self._device is not None:
-                devices.append(None)  # fallback to system default
+            devices = [self._sd_device]
+            if self._sd_device is not None:
+                devices.append(None)  # fallback
             for dev in devices:
                 try:
-                    with sd.InputStream(samplerate=self._rate, channels=1, device=dev,
-                                        dtype="int16", blocksize=0, callback=_cb):
+                    with sd.InputStream(
+                        samplerate=self._rate, channels=1, device=dev,
+                        dtype="int16", blocksize=0, callback=_cb,
+                    ):
                         self._stop_ev.wait()
+                    break
+                except sd.CallbackStop:
                     break
                 except Exception as e:
                     if dev is devices[-1]:
-                        log.warning("VAD stream error: %s", e)
+                        log.warning("AlwaysOnStream open failed: %s", e)
                     else:
-                        log.debug("VAD: device %r failed (%s), trying system default", dev, e)
+                        log.debug("AlwaysOnStream: device %r failed (%s), trying default", dev, e)
         finally:
             if self._pulse_source:
                 os.environ.pop("PULSE_SOURCE", None)
 
-    def stop(self) -> None:
-        self._stop_ev.set()
+        if not had_speech:
+            log.debug("AlwaysOnStream: no speech detected, discarding")
+            self._on_silence_fired()
+            return
+
+        # Trim trailing silence (keep max 0.5s after last speech)
+        trail_frames = int(500 / frame_ms)
+        last_speech  = len(recorded_chunks)
+        for i in range(len(recorded_chunks) - 1, -1, -1):
+            try:
+                if vad.is_speech(recorded_chunks[i], self._rate):
+                    last_speech = i + 1
+                    break
+            except Exception:
+                break
+        keep = recorded_chunks[:last_speech + trail_frames]
+
+        if not keep:
+            self._on_silence_fired()
+            return
+
+        # Write WAV
+        self._tmp_dir.mkdir(parents=True, exist_ok=True)
+        wav_path = self._tmp_dir / f"ao_{int(time.time())}.wav"
+        try:
+            with wave.open(str(wav_path), "wb") as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(2)
+                wf.setframerate(self._rate)
+                wf.writeframes(b"".join(keep))
+            log.info("AlwaysOnStream: wrote %s (%.1fs)", wav_path,
+                     len(keep) * frame_ms / 1000)
+        except Exception as e:
+            log.error("AlwaysOnStream: WAV write failed: %s", e)
+            self._on_silence_fired()
+            return
+
+        self._on_silence_fired()
+        self._on_audio_ready(wav_path)
 
 
 class _TranscribeWorker(QThread):
@@ -134,11 +209,7 @@ class _TranscribeWorker(QThread):
 
 
 def _sd_device(cfg_device: str | None) -> tuple:
-    """Return (sd_device, pulse_source_env) for the configured device.
-    sd_device = value for sd.InputStream(device=...), None = system default.
-    pulse_source_env = value to set in PULSE_SOURCE env var, or None.
-    Pactl source names (alsa_input.*, bluez_input.*) are routed via pulse+PULSE_SOURCE.
-    """
+    """Return (sd_device, pulse_source_env) for the configured device."""
     if not cfg_device or cfg_device == "default":
         return None, None
     if cfg_device.startswith(("alsa_input.", "bluez_input.")):
@@ -147,6 +218,8 @@ def _sd_device(cfg_device: str | None) -> tuple:
 
 
 class _LevelThread(threading.Thread):
+    """Level meter for manual recording mode (arecord-based)."""
+
     def __init__(self, on_level, rate: int = 16000, device: str | None = None):
         super().__init__(daemon=True)
         self._on_level = on_level
@@ -194,7 +267,9 @@ class VoiceService(QObject):
     transcribed        = pyqtSignal(str)
     error              = pyqtSignal(str)
     level_changed      = pyqtSignal(int)
-    _vad_silence       = pyqtSignal()  # cross-thread safe trigger for auto-stop
+    # Internal cross-thread signals
+    _ao_audio_ready    = pyqtSignal(object)   # Path — always-on WAV ready
+    _ao_silence_fired  = pyqtSignal()          # stream finished (with or without audio)
 
     def __init__(self, cfg: dict, parent=None):
         super().__init__(parent)
@@ -202,13 +277,15 @@ class VoiceService(QObject):
         self._recording = False
         self._wav_path: pathlib.Path | None = None
         self._level_thread: _LevelThread | None = None
-        self._vad_thread: _VADThread | None = None
+        self._ao_stream: _AlwaysOnStream | None = None
         self._worker: _TranscribeWorker | None = None
         self._transcriber = None
         self._max_rec_timer = QTimer(self)
         self._max_rec_timer.setSingleShot(True)
         self._max_rec_timer.timeout.connect(self.stop_recording)
-        self._vad_silence.connect(self.stop_recording)
+
+        self._ao_audio_ready.connect(self._on_ao_audio_ready)
+        self._ao_silence_fired.connect(self._on_ao_silence_fired)
 
         from crowia.recorder import Recorder
         self._recorder = Recorder(cfg)
@@ -234,54 +311,91 @@ class VoiceService(QObject):
             self._worker is not None and self._worker.isRunning()
         )
 
+    # ── Manual recording (hotkey) ─────────────────────────────────────────────
+
     def start_recording(self, auto_stop: bool = False) -> None:
         if self._recording:
             return
         self._recording = True
+
+        if auto_stop:
+            self._start_always_on_stream()
+        else:
+            self._start_manual_stream()
+
+        self.started.emit()
+        log.info("VoiceService: recording started (auto_stop=%s)", auto_stop)
+
+    def _start_manual_stream(self) -> None:
+        """arecord subprocess + level meter — for hotkey-triggered recording."""
         self._wav_path = self._recorder.start()
         audio_cfg  = self._cfg.get("audio", {})
         cfg_device = audio_cfg.get("monitor_device") or audio_cfg.get("device", "default")
         rate       = audio_cfg.get("rate", 16000)
         self._level_thread = _LevelThread(self._emit_level, rate=rate, device=cfg_device)
         self._level_thread.start()
-        if auto_stop:
-            ao = self._cfg.get("always_on", {})
-            self._vad_thread = _VADThread(
-                on_silence=self._vad_silence.emit,
-                rate=rate,
-                silence_ms=ao.get("silence_duration_ms", 1500),
-                min_speech_ms=ao.get("min_speech_ms", 400),
-                aggressiveness=ao.get("vad_aggressiveness", 2),
-                device=cfg_device,
-            )
-            self._vad_thread.start()
-            max_sec = ao.get("max_record_seconds", 30)
-            self._max_rec_timer.start(max_sec * 1000)
-        self.started.emit()
-        log.info("VoiceService: recording started (auto_stop=%s)", auto_stop)
+        ao = self._cfg.get("always_on", {})
+        max_sec = self._cfg.get("hotkey", {}).get("max_record_seconds", 300)
+        self._max_rec_timer.start(max_sec * 1000)
+
+    def _start_always_on_stream(self) -> None:
+        """Single unified sounddevice stream — VAD + recording + level."""
+        self._ao_stream = _AlwaysOnStream(
+            cfg=self._cfg,
+            on_audio_ready=lambda p: self._ao_audio_ready.emit(p),
+            on_level=lambda lvl: self.level_changed.emit(lvl),
+            on_silence_fired=lambda: self._ao_silence_fired.emit(),
+        )
+        self._ao_stream.start()
+
+    def _on_ao_silence_fired(self) -> None:
+        """Always-on stream finished — update recording state."""
+        if not self._recording:
+            return
+        self._recording = False
+        self._ao_stream = None
+        self.level_changed.emit(0)
+        self.stopped_recording.emit()
+
+    def _on_ao_audio_ready(self, wav_path: pathlib.Path) -> None:
+        """Always-on: WAV is ready, kick off transcription."""
+        if not wav_path.exists():
+            self.error.emit("No audio recorded")
+            return
+        self._worker = _TranscribeWorker(self._cfg, wav_path, self._transcriber, self)
+        self._worker.transcriber_ready.connect(lambda t: setattr(self, "_transcriber", t))
+        self._worker.done.connect(self._on_transcribed)
+        self._worker.error.connect(self.error)
+        self._worker.start()
+
+    # ── Manual stop ───────────────────────────────────────────────────────────
 
     def stop_recording(self) -> None:
         if not self._recording:
             return
         self._recording = False
         self._max_rec_timer.stop()
-        if self._vad_thread:
-            self._vad_thread.stop()
-            self._vad_thread = None
-        wav = self._recorder.stop()
+
+        if self._ao_stream:
+            self._ao_stream.stop()
+            self._ao_stream = None
+            # _on_ao_silence_fired already emits stopped_recording via signal;
+            # but since we forced stop, emit directly
+            self.level_changed.emit(0)
+            self.stopped_recording.emit()
+            return
+
+        # Manual mode: stop arecord
         if self._level_thread:
             self._level_thread.stop()
             self._level_thread = None
+        wav = self._recorder.stop()
         self.level_changed.emit(0)
         self.stopped_recording.emit()
 
         if wav and wav.exists():
-            self._worker = _TranscribeWorker(
-                self._cfg, wav, self._transcriber, self
-            )
-            self._worker.transcriber_ready.connect(
-                lambda t: setattr(self, "_transcriber", t)
-            )
+            self._worker = _TranscribeWorker(self._cfg, wav, self._transcriber, self)
+            self._worker.transcriber_ready.connect(lambda t: setattr(self, "_transcriber", t))
             self._worker.done.connect(self._on_transcribed)
             self._worker.error.connect(self.error)
             self._worker.start()
