@@ -477,7 +477,10 @@ class MainWindow(QMainWindow):
         self._tts_active = False
         self._set_state("idle")
         self._giselo_core.set_pill_text("● ESCUCHANDO · LVL 0%")
-        self._resume_always_on()
+        # Delay: speaker hardware buffer may still be playing ~500-800ms after
+        # piper/aplay signal done. Without delay, mic captures TTS output.
+        from PyQt6.QtCore import QTimer
+        QTimer.singleShot(1200, self._resume_always_on)
 
     # ── Voice slots ───────────────────────────────────────────────────────────
 
