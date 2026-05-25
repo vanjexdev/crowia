@@ -25,7 +25,7 @@ class AlwaysOnListener:
     Flow: IDLE → (wake word) → ACTIVE → (utterance) → IDLE
     """
 
-    def __init__(self, cfg: dict, on_speech_ready, transcriber, on_wake=None, on_idle=None):
+    def __init__(self, cfg: dict, on_speech_ready, transcriber, on_wake=None, on_idle=None, on_text_ready=None):
         ao = cfg.get("always_on", {})
         self.wake_phrases: list[str] = [
             p.lower() for p in ao.get("wake_phrases", ["oye crowia", "hey crowia", "crowia"])
@@ -38,6 +38,7 @@ class AlwaysOnListener:
         self.on_speech_ready = on_speech_ready
         self.on_wake = on_wake or (lambda: None)
         self.on_idle = on_idle or (lambda: None)
+        self.on_text_ready = on_text_ready or (lambda txt: None)
 
         self._vad = webrtcvad.Vad(self._vad_level)
         self._silence_frames = int(self._silence_ms / FRAME_MS)
@@ -141,6 +142,13 @@ class AlwaysOnListener:
                     log.info("Wake word detected: '%s'", text)
                     self._active = True
                     self.on_wake()
+
+                    # If user spoke command inline (e.g. "oye giselo dame la hora"),
+                    # extract trailing and send directly to text pipeline
+                    trailing = self._extract_trailing(text)
+                    if trailing:
+                        log.info("Inline command detected: '%s'", trailing)
+                        self.on_text_ready(trailing)
                 else:
                     log.debug("No wake word in: '%s'", text)
 
@@ -160,6 +168,17 @@ class AlwaysOnListener:
                         log.debug("Fuzzy match: '%s' ~ '%s' (%.2f)", pw, tw, ratio)
                         return True
         return False
+
+    def _extract_trailing(self, text: str) -> str | None:
+        """Extract text after wake phrase. E.g. 'oye giselo dame la hora' → 'dame la hora'."""
+        low = text.lower().strip()
+        for phrase in self.wake_phrases:
+            idx = low.find(phrase)
+            if idx >= 0:
+                # Extract after wake phrase + strip
+                trailing = text[idx + len(phrase):].strip()
+                return trailing if trailing else None
+        return None
 
     def _save_wav(self, frames: list[bytes]) -> pathlib.Path | None:
         try:

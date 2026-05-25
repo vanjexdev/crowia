@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/home/jesusu/Workspace/agents/crowia/.venv/bin/python3
 import argparse
 import asyncio
 import datetime
@@ -435,12 +435,20 @@ def main():
             log.info("Transcribed: %s", text)
             _run_text_pipeline(text)
 
+        def on_text_ready(text: str):
+            """Handle inline commands detected after wake phrase."""
+            def _wrapper():
+                with pipeline_lock:
+                    _run_text_pipeline(text)
+            threading.Thread(target=_wrapper, daemon=True).start()
+
         listener = AlwaysOnListener(
             cfg=cfg,
             on_speech_ready=on_speech_ready,
             transcriber=transcriber,
             on_wake=lambda: (ui("recording"), thread_safe_show_status("Escuchando…")),
             on_idle=lambda: (ui("idle"), thread_safe_show_status(f"Di '{wake_phrases[0]}' para activar")),
+            on_text_ready=on_text_ready,
         )
         log.info("crowia listo. Modo: always-on | Wake: %s | Whisper: %s",
                  wake_phrases, cfg["whisper"]["model"])
