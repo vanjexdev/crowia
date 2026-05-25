@@ -87,6 +87,9 @@ always_on:
   - oye giselo
   - hey giselo
   - giselo
+  - oye gisela
+  - hey gisela
+  - gisela
   vad_aggressiveness: 2
   silence_duration_ms: 1500
   min_speech_ms: 600

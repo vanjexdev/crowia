@@ -532,14 +532,19 @@ class MainWindow(QMainWindow):
                 (pathlib.Path(__file__).parents[2] / "config.yaml").read_text(encoding="utf-8")
             )
             asst = cfg.get("assistant", {})
-            gender = asst.get("gender", "male")
-            name = asst.get("name_female" if gender == "female" else "name_male", "Giselo").lower()
             ao = cfg.get("always_on", {})
             static = [p.lower() for p in ao.get("wake_phrases", [])]
-            dynamic = [name, f"oye {name}", f"hey {name}", f"hola {name}"]
+            # Always include both name variants regardless of gender config
+            names = {
+                asst.get("name_male", "Giselo").lower(),
+                asst.get("name_female", "Gisela").lower(),
+            }
+            dynamic = []
+            for n in sorted(names):
+                dynamic += [n, f"oye {n}", f"hey {n}", f"hola {n}"]
             return list(dict.fromkeys(static + dynamic))
         except Exception:
-            return ["giselo", "oye giselo", "hey giselo", "giseth", "oye giseth", "hey giseth"]
+            return ["giselo", "gisela", "oye giselo", "hey giselo", "oye gisela", "hey gisela"]
 
     def _check_wake_word(self, text: str, wake_words: list[str]) -> tuple[str, bool]:
         import re
