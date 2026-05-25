@@ -16,7 +16,15 @@ def register(window: QWidget) -> None:
     _s("Ctrl+L",       window.toggle_voice)
     _s("Ctrl+Shift+C", window.toggle_camera)
     _s("Ctrl+K",       window.open_palette)
-    _s("Escape",       window.close_drawer)
+    def _escape():
+        from giselo.app.state import state as _st
+        svc = getattr(window, "_services", {}).get(_st.active_instance)
+        if svc and svc.busy:
+            window._on_cancel()
+        else:
+            window.close_drawer()
+
+    _s("Escape", _escape)
 
     _s("Ctrl+1", lambda: window.switch_instance("opencode"))
     _s("Ctrl+2", lambda: window.switch_instance("claude"))

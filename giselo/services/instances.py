@@ -17,12 +17,14 @@ class _AskWorker(QObject):
     done     = pyqtSignal(str)
     error    = pyqtSignal(str)
 
-    def __init__(self, assistant: Assistant, text: str, history: list[dict]):
+    def __init__(self, assistant: Assistant, text: str, history: list[dict],
+                 image_path: str | None = None):
         super().__init__()
-        self._assistant = assistant
-        self._text      = text
-        self._history   = history
-        self._cancelled = False
+        self._assistant  = assistant
+        self._text       = text
+        self._history    = history
+        self._image_path = image_path
+        self._cancelled  = False
 
     def cancel(self) -> None:
         self._cancelled = True
@@ -30,10 +32,13 @@ class _AskWorker(QObject):
 
     @pyqtSlot()
     def run(self) -> None:
+        import pathlib
+        img = pathlib.Path(self._image_path) if self._image_path else None
         try:
             full = self._assistant.ask(
                 text=self._text,
                 history=self._history,
+                image_path=img,
                 on_chunk=lambda c: self.chunk.emit(c) if not self._cancelled else None,
             )
             if not self._cancelled:
@@ -99,7 +104,8 @@ class InstanceService(QObject):
             f"{base}\n\nEstás corriendo sobre el backend '{name}'.{persona_line}"
         )
 
-    def ask(self, text: str, history: list[dict] | None = None) -> None:
+    def ask(self, text: str, history: list[dict] | None = None,
+            image_path: str | None = None) -> None:
         if self._busy:
             log.warning("Already processing — ignoring ask")
             return
@@ -109,7 +115,7 @@ class InstanceService(QObject):
         self.busy_changed.emit(True)
 
         self._thread = QThread()
-        self._worker = _AskWorker(self._assistant, text, history)
+        self._worker = _AskWorker(self._assistant, text, history, image_path)
         self._worker.moveToThread(self._thread)
 
         self._thread.started.connect(self._worker.run)

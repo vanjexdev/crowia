@@ -21,17 +21,18 @@ from giselo.widgets.status_bar   import StatusBar
 from giselo.widgets.camera_pip   import CameraPip
 from giselo.widgets.palette_popup import PalettePopup
 
-from giselo.panels import memoria, historial, sistema, cola, notif, tokens, config_panel
+from giselo.panels import memoria, historial, sistema, cola, notif, tokens, config_panel, voice_hist
 
 
 DRAWER_BUILDERS = {
-    "memoria":   (memoria.build,   LIME,      "Memoria"),
-    "historial": (historial.build, CYAN,      "Historial"),
-    "sistema":   (sistema.build,   "#e8c33a", "Sistema"),
-    "cola":      (cola.build,      ORANGE,    "Cola"),
-    "notif":     (notif.build,     MUTE,      "Notificaciones"),
-    "tokens":    (tokens.build,       LIME,      "Tokens"),
-    "config":    (config_panel.build, MUTE,      "Configuración"),
+    "memoria":   (memoria.build,     LIME,      "Memoria"),
+    "historial": (historial.build,   CYAN,      "Historial"),
+    "voz":       (voice_hist.build,  LIME,      "Voz"),
+    "sistema":   (sistema.build,     "#e8c33a", "Sistema"),
+    "cola":      (cola.build,        ORANGE,    "Cola"),
+    "notif":     (notif.build,       MUTE,      "Notificaciones"),
+    "tokens":    (tokens.build,      LIME,      "Tokens"),
+    "config":    (config_panel.build, MUTE,     "Configuración"),
 }
 
 
@@ -81,10 +82,21 @@ class MainWindow(QMainWindow):
         from crowia.config import load as load_cfg
         _cfg = load_cfg()
 
+        self._playerctl_available = False
+        try:
+            import shutil
+            self._playerctl_available = bool(shutil.which("playerctl"))
+        except Exception:
+            pass
+        self._pause_media_on_tts = _cfg.get("output", {}).get("tts_pause_media", True)
+        self._screen_ctx_enabled = False
+        self._screen_ctx_path = "/tmp/crowia/screen_ctx.png"
+
         from giselo.services.tts import TTSService
         self._tts = TTSService(_cfg, self)
         self._tts.started.connect(lambda: self._set_state("speaking"))
         self._tts.started.connect(lambda: setattr(self, "_tts_active", True))
+        self._tts.started.connect(self._on_tts_started_media)
         self._tts.finished.connect(self._on_tts_done)
         self._tts.error.connect(lambda e: notif.push(f"TTS: {e}", "warn"))
 
@@ -106,6 +118,8 @@ class MainWindow(QMainWindow):
 
         from giselo.widgets.floating_orb import FloatingOrb
         self._orb = FloatingOrb(self)
+        self._orb.set_instance(state.active_instance)
+        self._screen_ctx_enabled = self._orb.is_screen_ctx_enabled()
 
         from giselo.services.scheduler_svc import SchedulerService
         self._scheduler = SchedulerService(self)
@@ -387,6 +401,8 @@ class MainWindow(QMainWindow):
             self._on_busy_changed(svc.busy)
         backend = state.INSTANCE_BACKENDS.get(name, "claude")
         notif.push(f"Instancia: {name} ({backend})", "info")
+        if hasattr(self, "_orb"):
+            self._orb.set_instance(name)
         self._refresh_drawer_if_open("config")
 
     def _make_service(self, name: str) -> "InstanceService":
@@ -518,14 +534,40 @@ class MainWindow(QMainWindow):
 
     # ── TTS slots ─────────────────────────────────────────────────────────────
 
+    def _on_tts_started_media(self) -> None:
+        if self._pause_media_on_tts and self._playerctl_available:
+            import subprocess
+            subprocess.Popen(["playerctl", "pause"],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
     def _on_tts_done(self) -> None:
         self._tts_active = False
         self._set_state("idle")
         self._giselo_core.set_pill_text("● ESCUCHANDO · LVL 0%")
+        if self._pause_media_on_tts and self._playerctl_available:
+            import subprocess
+            subprocess.Popen(["playerctl", "play"],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         # Delay: speaker hardware buffer may still be playing ~500-800ms after
         # piper/aplay signal done. Without delay, mic captures TTS output.
         from PyQt6.QtCore import QTimer
         QTimer.singleShot(2000, self._resume_always_on)
+
+    def set_screen_ctx(self, enabled: bool) -> None:
+        self._screen_ctx_enabled = enabled
+
+    def _take_screen_ctx(self) -> str | None:
+        import subprocess, pathlib, shutil
+        out = self._screen_ctx_path
+        pathlib.Path(out).parent.mkdir(parents=True, exist_ok=True)
+        if shutil.which("spectacle"):
+            subprocess.run(["spectacle", "--background", "--nonotify", "-o", out],
+                           timeout=5, capture_output=True)
+        elif shutil.which("grim"):
+            subprocess.run(["grim", out], timeout=5, capture_output=True)
+        else:
+            return None
+        return out if pathlib.Path(out).exists() else None
 
     # ── Voice slots ───────────────────────────────────────────────────────────
 
@@ -553,9 +595,8 @@ class MainWindow(QMainWindow):
     def _on_voice_transcribed(self, text: str) -> None:
         state.voice_active = False
         self._status_bar.set_voice(False)
-        # In always-on mode, wake word was already verified by _WakeDetector.
-        # Just process the command directly.
         notif.push(f"Voz: {text[:40]}", "ok")
+        voice_hist.append(text, state.active_instance)
         self._on_message(text)
 
     def _get_wake_words(self) -> list[str]:
@@ -659,7 +700,8 @@ class MainWindow(QMainWindow):
         history = mem_svc.get_messages()[:-1]
         svc = self._services.get(active)
         if svc:
-            svc.ask(text, history)
+            img = self._take_screen_ctx() if self._screen_ctx_enabled else None
+            svc.ask(text, history, image_path=img)
 
     def _on_chunk_for(self, instance: str, chunk: str) -> None:
         chat = self._chats.get(instance)

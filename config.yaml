@@ -103,6 +103,7 @@ output:
   notify_timeout_ms: 8000
   response_file: /tmp/crowia/last_response.txt
   tts_enabled: true
+  tts_pause_media: true
   tts_command:
   - piper-tts
   - --model
@@ -147,25 +148,13 @@ instances:
   - opencode
   - claude
   - codex
+  - openrouter
   - Opencode Free
   - Opencode Premium
-  - Gemini Own
-  - Gemini API
-  - OpenRouter
   backends:
     opencode: opencode
     claude: claude
     codex: codex
+    openrouter: openrouter
     Opencode Free: opencode
     Opencode Premium: opencode
-    Gemini Own: gemini
-    Gemini API: gemini
-    OpenRouter: openrouter
-  config:
-    OpenRouter:
-      api_key: ""
-      model: google/gemini-2.0-flash-exp:free
-    Gemini API:
-      api_key: AIzaSyDvVev7A364wMc3mHKPK-DyTYbaB4kOUjA
-      base_url: 
-        https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent
