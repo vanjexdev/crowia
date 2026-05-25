@@ -90,7 +90,7 @@ always_on:
   vad_aggressiveness: 2
   silence_duration_ms: 1500
   min_speech_ms: 400
-  max_record_seconds: 30
+  max_record_seconds: 120
 history:
   enabled: true
   path: ~/.config/crowia/history.json
