@@ -82,13 +82,6 @@ class MainWindow(QMainWindow):
         from crowia.config import load as load_cfg
         _cfg = load_cfg()
 
-        self._playerctl_available = False
-        try:
-            import shutil
-            self._playerctl_available = bool(shutil.which("playerctl"))
-        except Exception:
-            pass
-        self._pause_media_on_tts = _cfg.get("output", {}).get("tts_pause_media", True)
         self._screen_ctx_enabled = False
         self._screen_ctx_path = "/tmp/crowia/screen_ctx.png"
 
@@ -96,7 +89,6 @@ class MainWindow(QMainWindow):
         self._tts = TTSService(_cfg, self)
         self._tts.started.connect(lambda: self._set_state("speaking"))
         self._tts.started.connect(lambda: setattr(self, "_tts_active", True))
-        self._tts.started.connect(self._on_tts_started_media)
         self._tts.finished.connect(self._on_tts_done)
         self._tts.error.connect(lambda e: notif.push(f"TTS: {e}", "warn"))
 
@@ -534,20 +526,10 @@ class MainWindow(QMainWindow):
 
     # ── TTS slots ─────────────────────────────────────────────────────────────
 
-    def _on_tts_started_media(self) -> None:
-        if self._pause_media_on_tts and self._playerctl_available:
-            import subprocess
-            subprocess.Popen(["playerctl", "pause"],
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
     def _on_tts_done(self) -> None:
         self._tts_active = False
         self._set_state("idle")
         self._giselo_core.set_pill_text("● ESCUCHANDO · LVL 0%")
-        if self._pause_media_on_tts and self._playerctl_available:
-            import subprocess
-            subprocess.Popen(["playerctl", "play"],
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         # Delay: speaker hardware buffer may still be playing ~500-800ms after
         # piper/aplay signal done. Without delay, mic captures TTS output.
         from PyQt6.QtCore import QTimer

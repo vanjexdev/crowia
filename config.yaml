@@ -103,7 +103,6 @@ output:
   notify_timeout_ms: 8000
   response_file: /tmp/crowia/last_response.txt
   tts_enabled: true
-  tts_pause_media: true
   tts_command:
   - piper-tts
   - --model
