@@ -297,7 +297,7 @@ class MainWindow(QMainWindow):
     def _resume_always_on(self) -> None:
         if not self._always_on:
             return
-        if self._voice.recording or self._tts_active or not self._input_bar.isEnabled():
+        if self._voice.busy or self._tts_active or not self._input_bar.isEnabled():
             return
         self._voice_is_auto = True
         self._voice.start_recording(auto_stop=True)
@@ -564,10 +564,18 @@ class MainWindow(QMainWindow):
         state.voice_active = False
         self._status_bar.set_voice(False)
         self._rail_right.set_active(None)
+        self._wake_triggered = False
+        from PyQt6.QtCore import QTimer
+        if self._always_on and msg == "No se detectó voz":
+            # Silence/background noise — resume quietly without error UI
+            log.debug("always-on: silent frame, resuming")
+            self._set_state("idle")
+            self._giselo_core.set_pill_text("● ESCUCHANDO · LVL 0%")
+            QTimer.singleShot(500, self._resume_always_on)
+            return
         self._set_state("error")
         self._giselo_core.set_pill_text("● ERROR VOZ")
         notif.push(f"Voz error: {msg}", "error")
-        from PyQt6.QtCore import QTimer
         QTimer.singleShot(2000, lambda: (
             self._giselo_core.set_pill_text("● ESCUCHANDO · LVL 0%"),
             self._resume_always_on(),

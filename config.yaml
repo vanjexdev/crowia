@@ -88,7 +88,7 @@ always_on:
   - hey giselo
   - giselo
   vad_aggressiveness: 2
-  silence_duration_ms: 1000
+  silence_duration_ms: 1500
   min_speech_ms: 400
   max_record_seconds: 30
 history:

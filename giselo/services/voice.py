@@ -2,7 +2,7 @@ import logging
 import pathlib
 import threading
 import numpy as np
-from PyQt6.QtCore import QObject, QThread, pyqtSignal
+from PyQt6.QtCore import QObject, QThread, QTimer, pyqtSignal
 
 log = logging.getLogger(__name__)
 
@@ -205,6 +205,9 @@ class VoiceService(QObject):
         self._vad_thread: _VADThread | None = None
         self._worker: _TranscribeWorker | None = None
         self._transcriber = None
+        self._max_rec_timer = QTimer(self)
+        self._max_rec_timer.setSingleShot(True)
+        self._max_rec_timer.timeout.connect(self.stop_recording)
         self._vad_silence.connect(self.stop_recording)
 
         from crowia.recorder import Recorder
@@ -224,6 +227,13 @@ class VoiceService(QObject):
     def recording(self) -> bool:
         return self._recording
 
+    @property
+    def busy(self) -> bool:
+        """True while recording OR transcription worker is running."""
+        return self._recording or (
+            self._worker is not None and self._worker.isRunning()
+        )
+
     def start_recording(self, auto_stop: bool = False) -> None:
         if self._recording:
             return
@@ -239,12 +249,14 @@ class VoiceService(QObject):
             self._vad_thread = _VADThread(
                 on_silence=self._vad_silence.emit,
                 rate=rate,
-                silence_ms=ao.get("silence_duration_ms", 1000),
+                silence_ms=ao.get("silence_duration_ms", 1500),
                 min_speech_ms=ao.get("min_speech_ms", 400),
                 aggressiveness=ao.get("vad_aggressiveness", 2),
                 device=cfg_device,
             )
             self._vad_thread.start()
+            max_sec = ao.get("max_record_seconds", 30)
+            self._max_rec_timer.start(max_sec * 1000)
         self.started.emit()
         log.info("VoiceService: recording started (auto_stop=%s)", auto_stop)
 
@@ -252,6 +264,7 @@ class VoiceService(QObject):
         if not self._recording:
             return
         self._recording = False
+        self._max_rec_timer.stop()
         if self._vad_thread:
             self._vad_thread.stop()
             self._vad_thread = None
