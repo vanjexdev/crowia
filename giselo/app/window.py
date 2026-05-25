@@ -95,6 +95,7 @@ class MainWindow(QMainWindow):
         self._voice.transcribed.connect(self._on_voice_transcribed)
         self._voice.error.connect(self._on_voice_error)
         self._voice.level_changed.connect(self._on_voice_level)
+        self._voice.wake_detected.connect(self._on_wake_detected)
 
         from giselo.app import shortcuts
         shortcuts.register(self)
@@ -282,13 +283,13 @@ class MainWindow(QMainWindow):
         self._always_on = not self._always_on
         self._input_bar.set_always_on(self._always_on)
         if self._always_on:
-            if not self._voice.recording and not self._tts_active:
-                self._voice_is_auto = True
-                self._voice.start_recording(auto_stop=True)
+            if not self._voice.busy and not self._tts_active:
+                self._resume_always_on()
             if hasattr(self, "_orb"):
                 self._orb.show()
         else:
             self._wake_triggered = False
+            self._voice.stop_wake_listening()
             if self._voice.recording:
                 self._voice.stop_recording()
             if hasattr(self, "_orb") and not self.isMinimized():
@@ -297,10 +298,12 @@ class MainWindow(QMainWindow):
     def _resume_always_on(self) -> None:
         if not self._always_on:
             return
-        if self._voice.busy or self._tts_active or not self._input_bar.isEnabled():
+        if self._voice.busy or self._voice.wake_listening or self._tts_active or not self._input_bar.isEnabled():
             return
-        self._voice_is_auto = True
-        self._voice.start_recording(auto_stop=True)
+        wake_words = self._get_wake_words()
+        self._set_state("idle")
+        self._giselo_core.set_pill_text("● ESCUCHANDO · LVL 0%")
+        self._voice.start_wake_listening(wake_words)
 
     def toggle_camera(self) -> None:
         if self._camera_pip.active:
@@ -484,13 +487,22 @@ class MainWindow(QMainWindow):
 
     # ── Voice slots ───────────────────────────────────────────────────────────
 
+    def _on_wake_detected(self) -> None:
+        """Phase-1 confirmed wake word — switch UI to listening-for-command state."""
+        self._set_state("listening")
+        self._giselo_core.set_pill_text("● TE ESCUCHO...")
+        state.voice_active = True
+        self._status_bar.set_voice(True)
+        self._rail_right.set_active("voz")
+
     def _on_voice_started(self) -> None:
         state.voice_active = True
         self._status_bar.set_voice(True)
         self._rail_right.set_active("voz")
         self._set_state("listening")
         self._giselo_core.set_pill_text("● GRABANDO · LVL 0%")
-        notif.push("Grabación iniciada", "info")
+        if not self._always_on:
+            notif.push("Grabación iniciada", "info")
 
     def _on_voice_stopped(self) -> None:
         self._rail_right.set_active(None)
@@ -499,32 +511,8 @@ class MainWindow(QMainWindow):
     def _on_voice_transcribed(self, text: str) -> None:
         state.voice_active = False
         self._status_bar.set_voice(False)
-        was_auto = self._voice_is_auto
-        self._voice_is_auto = False
-        if was_auto:
-            if self._wake_triggered:
-                # Previous utterance was wake-word-only — process this one directly
-                self._wake_triggered = False
-            else:
-                wake_words = self._get_wake_words()
-                clean, triggered = self._check_wake_word(text, wake_words)
-                if not triggered:
-                    log.info("Always-on: no wake word in %r, resuming", text[:60])
-                    preview = text[:30] if text.strip() else "(vacío)"
-                    self._giselo_core.set_pill_text(f"● oí: {preview}")
-                    from PyQt6.QtCore import QTimer
-                    QTimer.singleShot(2000, lambda: self._giselo_core.set_pill_text("● ESCUCHANDO · LVL 0%"))
-                    QTimer.singleShot(2200, self._resume_always_on)
-                    return
-                text = clean
-                if not text.strip():
-                    # Name only — activate next utterance without wake word
-                    self._wake_triggered = True
-                    self._set_state("listening")
-                    self._giselo_core.set_pill_text("● TE ESCUCHO...")
-                    from PyQt6.QtCore import QTimer
-                    QTimer.singleShot(200, self._resume_always_on)
-                    return
+        # In always-on mode, wake word was already verified by _WakeDetector.
+        # Just process the command directly.
         notif.push(f"Voz: {text[:40]}", "ok")
         self._on_message(text)
 
@@ -576,12 +564,12 @@ class MainWindow(QMainWindow):
         self._rail_right.set_active(None)
         self._wake_triggered = False
         from PyQt6.QtCore import QTimer
-        if self._always_on and msg == "No se detectó voz":
-            # Silence/background noise — resume quietly without error UI
-            log.debug("always-on: silent frame, resuming")
+        if self._always_on and msg in ("No se detectó voz", "No audio recorded"):
+            # Command phase got empty audio — restart wake listening quietly
+            log.debug("always-on: empty command audio, back to wake listening")
             self._set_state("idle")
             self._giselo_core.set_pill_text("● ESCUCHANDO · LVL 0%")
-            QTimer.singleShot(500, self._resume_always_on)
+            QTimer.singleShot(300, self._resume_always_on)
             return
         self._set_state("error")
         self._giselo_core.set_pill_text("● ERROR VOZ")
@@ -783,7 +771,7 @@ class MainWindow(QMainWindow):
         self._cancel_bar.setVisible(busy)
         if not busy:
             state.giselo_state = "idle"
-            if self._always_on and not self._voice.recording and not self._tts_active:
+            if self._always_on and not self._voice.busy and not self._voice.wake_listening and not self._tts_active:
                 from PyQt6.QtCore import QTimer
                 QTimer.singleShot(400, self._resume_always_on)
         state.mem_tokens = len(str(self._response_bufs.get(state.active_instance, ""))) // 4

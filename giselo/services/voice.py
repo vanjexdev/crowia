@@ -9,11 +9,165 @@ from PyQt6.QtCore import QObject, QThread, QTimer, pyqtSignal
 log = logging.getLogger(__name__)
 
 
-class _AlwaysOnStream(threading.Thread):
-    """Single sounddevice stream: VAD + recording + level in one callback.
+# ── Phase-1: Wake word detector ───────────────────────────────────────────────
 
-    No arecord subprocess. No device conflicts. Captures frames, runs webrtcvad,
-    accumulates speech into memory, writes WAV when silence detected.
+class _WakeDetector(threading.Thread):
+    """Phase-1 always-on: webrtcvad detects speech onset → tiny Whisper checks wake word.
+
+    Very lightweight: tiny Whisper only runs when webrtcvad fires (not on silence).
+    Tiny Whisper on a 2-3s clip takes ~0.3-0.5s on CPU.
+    On wake word confirmed → calls on_wake().
+    """
+
+    CLIP_AFTER_SPEECH_MS = 1200   # capture N ms after speech starts, then transcribe
+    PRE_SPEECH_MS        = 400    # keep N ms of audio before speech onset (ring buffer)
+
+    def __init__(self, cfg: dict, wake_words: list[str], on_wake, on_level):
+        super().__init__(daemon=True)
+        ao                   = cfg.get("always_on", {})
+        audio_cfg            = cfg.get("audio", {})
+        self._rate           = audio_cfg.get("rate", 16000)
+        self._aggressiveness = ao.get("vad_aggressiveness", 2)
+        cfg_device           = audio_cfg.get("monitor_device") or audio_cfg.get("device", "default")
+        self._sd_device, self._pulse_source = _sd_device(cfg_device)
+        self._wake_words     = [w.lower() for w in wake_words]
+        self._on_wake        = on_wake   # callback()
+        self._on_level       = on_level  # callback(int)
+        self._stop_ev        = threading.Event()
+        self._tiny_model     = None
+        self._model_lock     = threading.Lock()
+
+    def stop(self) -> None:
+        self._stop_ev.set()
+
+    def _load_model(self):
+        with self._model_lock:
+            if self._tiny_model is None:
+                from faster_whisper import WhisperModel
+                log.info("WakeDetector: loading tiny Whisper…")
+                self._tiny_model = WhisperModel("tiny", device="cpu", compute_type="int8")
+                log.info("WakeDetector: tiny Whisper ready")
+
+    def _check_clip(self, frames: list[bytes]) -> bool:
+        """Run tiny Whisper on the buffered clip. Return True if wake word found."""
+        if not frames:
+            return False
+        audio = np.frombuffer(b"".join(frames), dtype=np.int16).astype(np.float32) / 32768.0
+        try:
+            segs, _ = self._tiny_model.transcribe(
+                audio,
+                language="es",
+                beam_size=1,
+                temperature=0,
+                vad_filter=False,       # already know there's speech
+                no_speech_threshold=0.7,
+            )
+            text = " ".join(s.text for s in segs).lower().strip()
+        except Exception as e:
+            log.debug("WakeDetector transcribe error: %s", e)
+            return False
+        log.info("WakeDetector heard: %r", text)
+        return any(w in text for w in self._wake_words)
+
+    def run(self) -> None:
+        import os
+        try:
+            import webrtcvad
+            import sounddevice as sd
+        except ImportError as e:
+            log.error("WakeDetector deps missing: %s", e)
+            return
+
+        self._load_model()
+
+        vad          = webrtcvad.Vad(self._aggressiveness)
+        frame_ms     = 20
+        frame_samp   = self._rate * frame_ms // 1000
+        frame_bytes  = frame_samp * 2
+
+        pre_frames   = self.PRE_SPEECH_MS // frame_ms
+        post_frames  = self.CLIP_AFTER_SPEECH_MS // frame_ms
+
+        # State
+        buf          = b""
+        ring         = []            # pre-speech ring buffer
+        clip         = []            # current capture (pre + speech + post)
+        capturing    = False
+        cap_frames   = 0
+        triggered    = False
+
+        if self._pulse_source:
+            os.environ["PULSE_SOURCE"] = self._pulse_source
+
+        def _cb(indata, n_frames, _time, status):
+            nonlocal buf, ring, clip, capturing, cap_frames, triggered
+
+            if triggered or self._stop_ev.is_set():
+                raise sd.CallbackStop()
+
+            mono = indata[:, 0] if indata.ndim > 1 else indata.ravel()
+
+            # Level
+            rms = float(np.sqrt(np.mean(mono.astype(np.float32) ** 2)))
+            self._on_level(min(100, int(rms * 600)))
+
+            buf += mono.astype(np.int16).tobytes()
+
+            while len(buf) >= frame_bytes and not triggered:
+                chunk, buf = buf[:frame_bytes], buf[frame_bytes:]
+
+                try:
+                    is_speech = vad.is_speech(chunk, self._rate)
+                except Exception:
+                    continue
+
+                if not capturing:
+                    ring.append(chunk)
+                    if len(ring) > pre_frames:
+                        ring.pop(0)
+                    if is_speech:
+                        capturing = True
+                        cap_frames = 0
+                        clip = list(ring) + [chunk]
+                else:
+                    clip.append(chunk)
+                    cap_frames += 1
+                    if cap_frames >= post_frames:
+                        # Enough audio — transcribe in a side thread
+                        triggered = True
+                        self._stop_ev.set()
+                        raise sd.CallbackStop()
+
+        try:
+            devices = [self._sd_device]
+            if self._sd_device is not None:
+                devices.append(None)
+            for dev in devices:
+                try:
+                    with sd.InputStream(samplerate=self._rate, channels=1, device=dev,
+                                        dtype="int16", blocksize=0, callback=_cb):
+                        self._stop_ev.wait()
+                    break
+                except sd.CallbackStop:
+                    break
+                except Exception as e:
+                    if dev is devices[-1]:
+                        log.warning("WakeDetector stream error: %s", e)
+                    else:
+                        log.debug("WakeDetector: device %r failed, trying default", dev)
+        finally:
+            if self._pulse_source:
+                os.environ.pop("PULSE_SOURCE", None)
+
+        if clip and self._check_clip(clip):
+            self._on_wake()
+
+
+# ── Phase-2: Command recorder ─────────────────────────────────────────────────
+
+class _AlwaysOnStream(threading.Thread):
+    """Phase-2: captures the user's command after wake word confirmed.
+    Single sounddevice stream: VAD + recording + level in one callback.
     """
 
     def __init__(self, cfg: dict, on_audio_ready, on_level, on_silence_fired):
@@ -27,9 +181,9 @@ class _AlwaysOnStream(threading.Thread):
         self._max_sec  = ao.get("max_record_seconds", 120)
         cfg_device     = audio_cfg.get("monitor_device") or audio_cfg.get("device", "default")
         self._sd_device, self._pulse_source = _sd_device(cfg_device)
-        self._on_audio_ready  = on_audio_ready   # callback(wav_path: Path)
-        self._on_level        = on_level          # callback(level: int)
-        self._on_silence_fired = on_silence_fired # callback() — so VoiceService knows
+        self._on_audio_ready  = on_audio_ready
+        self._on_level        = on_level
+        self._on_silence_fired = on_silence_fired
         self._stop_ev  = threading.Event()
         self._tmp_dir  = pathlib.Path(audio_cfg.get("tmp_dir", "/tmp/crowia"))
 
@@ -50,19 +204,18 @@ class _AlwaysOnStream(threading.Thread):
 
         vad = webrtcvad.Vad(self._aggressiveness)
         frame_ms      = 20
-        frame_samples = self._rate * frame_ms // 1000   # 320 samples @ 16kHz
-        frame_bytes   = frame_samples * 2               # int16
+        frame_samples = self._rate * frame_ms // 1000
+        frame_bytes   = frame_samples * 2
 
         min_speech_frames  = self._min_speech_ms // frame_ms
         max_silence_frames = self._silence_ms // frame_ms
         max_frames         = int(self._max_sec * 1000 / frame_ms)
-        # Warmup: discard first 500ms — may contain speaker echo / TTS tail
-        warmup_frames      = 500 // frame_ms
+        # Warmup: discard first 300ms (speaker echo / mic stabilization)
+        warmup_frames      = 300 // frame_ms
 
-        # State
-        frames_buf      = b""          # raw bytes accumulator for 20ms chunks
-        recorded_chunks = []           # list of 20ms byte chunks (captured speech)
-        frames_total    = 0            # total 20ms frames processed
+        frames_buf      = b""
+        recorded_chunks = []
+        frames_total    = 0
         speech_frames   = 0
         silence_frames  = 0
         consec_speech   = 0
@@ -76,10 +229,8 @@ class _AlwaysOnStream(threading.Thread):
             if done or self._stop_ev.is_set():
                 raise sd.CallbackStop()
 
-            # Level meter (fast path, no VAD needed)
             rms = float(np.sqrt(np.mean(indata.astype(np.float32) ** 2)))
-            level = min(100, int(rms * 600))
-            self._on_level(level)
+            self._on_level(min(100, int(rms * 600)))
 
             mono = indata[:, 0] if indata.ndim > 1 else indata.ravel()
             frames_buf += mono.astype(np.int16).tobytes()
@@ -88,16 +239,13 @@ class _AlwaysOnStream(threading.Thread):
                 chunk, frames_buf = frames_buf[:frame_bytes], frames_buf[frame_bytes:]
                 frames_total += 1
 
-                # Discard first warmup_frames — absorbs TTS speaker echo
                 if frames_total <= warmup_frames:
                     continue
 
-                # Accumulate post-warmup frames
                 recorded_chunks.append(chunk)
 
-                # Hard cap
                 if len(recorded_chunks) >= max_frames:
-                    log.info("AlwaysOnStream: max_record_seconds reached, stopping")
+                    log.info("AlwaysOnStream: max_record_seconds reached")
                     done = True
                     self._stop_ev.set()
                     raise sd.CallbackStop()
@@ -113,14 +261,14 @@ class _AlwaysOnStream(threading.Thread):
                         had_speech = True
                     if had_speech:
                         consec_speech += 1
-                        if consec_speech > 4:   # >80ms sustained — real re-speech
+                        if consec_speech > 4:
                             silence_frames = 0
                 else:
                     consec_speech = 0
                     if had_speech:
                         silence_frames += 1
                         if silence_frames >= max_silence_frames:
-                            log.info("AlwaysOnStream: silence detected after speech")
+                            log.info("AlwaysOnStream: silence after speech")
                             done = True
                             self._stop_ev.set()
                             raise sd.CallbackStop()
@@ -128,34 +276,33 @@ class _AlwaysOnStream(threading.Thread):
         try:
             devices = [self._sd_device]
             if self._sd_device is not None:
-                devices.append(None)  # fallback
+                devices.append(None)
             for dev in devices:
                 try:
-                    with sd.InputStream(
-                        samplerate=self._rate, channels=1, device=dev,
-                        dtype="int16", blocksize=0, callback=_cb,
-                    ):
+                    with sd.InputStream(samplerate=self._rate, channels=1, device=dev,
+                                        dtype="int16", blocksize=0, callback=_cb):
                         self._stop_ev.wait()
                     break
                 except sd.CallbackStop:
                     break
                 except Exception as e:
                     if dev is devices[-1]:
-                        log.warning("AlwaysOnStream open failed: %s", e)
+                        log.warning("AlwaysOnStream error: %s", e)
                     else:
-                        log.debug("AlwaysOnStream: device %r failed (%s), trying default", dev, e)
+                        log.debug("AlwaysOnStream: device %r failed, trying default", dev)
         finally:
             if self._pulse_source:
                 os.environ.pop("PULSE_SOURCE", None)
 
         if not had_speech:
-            log.debug("AlwaysOnStream: no speech detected, discarding")
+            log.debug("AlwaysOnStream: no speech, discarding")
             self._on_silence_fired()
             return
 
-        # Trim trailing silence (keep max 0.5s after last speech)
-        trail_frames = int(500 / frame_ms)
-        last_speech  = len(recorded_chunks)
+        # Trim trailing silence
+        frame_ms_f = frame_ms
+        trail_frames = int(500 / frame_ms_f)
+        last_speech = len(recorded_chunks)
         for i in range(len(recorded_chunks) - 1, -1, -1):
             try:
                 if vad.is_speech(recorded_chunks[i], self._rate):
@@ -169,7 +316,6 @@ class _AlwaysOnStream(threading.Thread):
             self._on_silence_fired()
             return
 
-        # Write WAV
         self._tmp_dir.mkdir(parents=True, exist_ok=True)
         wav_path = self._tmp_dir / f"ao_{int(time.time())}.wav"
         try:
@@ -178,8 +324,7 @@ class _AlwaysOnStream(threading.Thread):
                 wf.setsampwidth(2)
                 wf.setframerate(self._rate)
                 wf.writeframes(b"".join(keep))
-            log.info("AlwaysOnStream: wrote %s (%.1fs)", wav_path,
-                     len(keep) * frame_ms / 1000)
+            log.info("AlwaysOnStream: wrote %s (%.1fs)", wav_path, len(keep) * frame_ms / 1000)
         except Exception as e:
             log.error("AlwaysOnStream: WAV write failed: %s", e)
             self._on_silence_fired()
@@ -188,6 +333,8 @@ class _AlwaysOnStream(threading.Thread):
         self._on_silence_fired()
         self._on_audio_ready(wav_path)
 
+
+# ── Transcription worker ──────────────────────────────────────────────────────
 
 class _TranscribeWorker(QThread):
     done              = pyqtSignal(str)
@@ -215,8 +362,9 @@ class _TranscribeWorker(QThread):
             self.error.emit(str(e))
 
 
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
 def _sd_device(cfg_device: str | None) -> tuple:
-    """Return (sd_device, pulse_source_env) for the configured device."""
     if not cfg_device or cfg_device == "default":
         return None, None
     if cfg_device.startswith(("alsa_input.", "bluez_input.")):
@@ -225,7 +373,7 @@ def _sd_device(cfg_device: str | None) -> tuple:
 
 
 class _LevelThread(threading.Thread):
-    """Level meter for manual recording mode (arecord-based)."""
+    """Level meter for manual (hotkey) recording."""
 
     def __init__(self, on_level, rate: int = 16000, device: str | None = None):
         super().__init__(daemon=True)
@@ -243,8 +391,7 @@ class _LevelThread(threading.Thread):
 
             def _cb(indata, frames, time_info, status):
                 rms = float(np.sqrt(np.mean(indata.astype(np.float32) ** 2)))
-                level = min(100, int(rms * 600))
-                self._on_level(level)
+                self._on_level(min(100, int(rms * 600)))
 
             devices = [self._device]
             if self._device is not None:
@@ -259,7 +406,7 @@ class _LevelThread(threading.Thread):
                     if dev is devices[-1]:
                         log.warning("Level monitor failed: %s", e)
                     else:
-                        log.debug("Level: device %r failed (%s), trying system default", dev, e)
+                        log.debug("Level: device %r failed, trying default", dev)
         finally:
             if self._pulse_source:
                 os.environ.pop("PULSE_SOURCE", None)
@@ -268,15 +415,19 @@ class _LevelThread(threading.Thread):
         self._stop.set()
 
 
+# ── VoiceService ──────────────────────────────────────────────────────────────
+
 class VoiceService(QObject):
     started            = pyqtSignal()
     stopped_recording  = pyqtSignal()
     transcribed        = pyqtSignal(str)
     error              = pyqtSignal(str)
     level_changed      = pyqtSignal(int)
+    wake_detected      = pyqtSignal()          # always-on: wake word confirmed
     # Internal cross-thread signals
-    _ao_audio_ready    = pyqtSignal(object)   # Path — always-on WAV ready
-    _ao_silence_fired  = pyqtSignal()          # stream finished (with or without audio)
+    _ao_audio_ready    = pyqtSignal(object)    # Path
+    _ao_silence_fired  = pyqtSignal()
+    _wake_confirmed    = pyqtSignal()          # from WakeDetector thread → main thread
 
     def __init__(self, cfg: dict, parent=None):
         super().__init__(parent)
@@ -285,6 +436,7 @@ class VoiceService(QObject):
         self._wav_path: pathlib.Path | None = None
         self._level_thread: _LevelThread | None = None
         self._ao_stream: _AlwaysOnStream | None = None
+        self._wake_detector: _WakeDetector | None = None
         self._worker: _TranscribeWorker | None = None
         self._transcriber = None
         self._max_rec_timer = QTimer(self)
@@ -293,6 +445,7 @@ class VoiceService(QObject):
 
         self._ao_audio_ready.connect(self._on_ao_audio_ready)
         self._ao_silence_fired.connect(self._on_ao_silence_fired)
+        self._wake_confirmed.connect(self._on_wake_confirmed)
 
         from crowia.recorder import Recorder
         self._recorder = Recorder(cfg)
@@ -313,40 +466,48 @@ class VoiceService(QObject):
 
     @property
     def busy(self) -> bool:
-        """True while recording OR transcription worker is running."""
         return self._recording or (
             self._worker is not None and self._worker.isRunning()
         )
 
-    # ── Manual recording (hotkey) ─────────────────────────────────────────────
+    @property
+    def wake_listening(self) -> bool:
+        return self._wake_detector is not None
 
-    def start_recording(self, auto_stop: bool = False) -> None:
-        if self._recording:
+    # ── Always-on: two-phase ──────────────────────────────────────────────────
+
+    def start_wake_listening(self, wake_words: list[str]) -> None:
+        """Phase 1: start lightweight wake word detector."""
+        if self._wake_detector is not None:
             return
+        log.info("WakeDetector: starting, words=%s", wake_words)
+        self._wake_detector = _WakeDetector(
+            cfg=self._cfg,
+            wake_words=wake_words,
+            on_wake=lambda: self._wake_confirmed.emit(),
+            on_level=lambda lvl: self.level_changed.emit(lvl),
+        )
+        self._wake_detector.start()
+
+    def stop_wake_listening(self) -> None:
+        if self._wake_detector:
+            self._wake_detector.stop()
+            self._wake_detector = None
+        self.level_changed.emit(0)
+
+    def _on_wake_confirmed(self) -> None:
+        """Main thread: wake word detected → stop detector, start command recording."""
+        self._wake_detector = None   # thread exits after calling on_wake
+        self.level_changed.emit(0)
+        self.wake_detected.emit()    # window.py uses this for UI state
+        log.info("Wake word confirmed, starting command recording")
+        self._start_always_on_stream()
         self._recording = True
-
-        if auto_stop:
-            self._start_always_on_stream()
-        else:
-            self._start_manual_stream()
-
         self.started.emit()
-        log.info("VoiceService: recording started (auto_stop=%s)", auto_stop)
-
-    def _start_manual_stream(self) -> None:
-        """arecord subprocess + level meter — for hotkey-triggered recording."""
-        self._wav_path = self._recorder.start()
-        audio_cfg  = self._cfg.get("audio", {})
-        cfg_device = audio_cfg.get("monitor_device") or audio_cfg.get("device", "default")
-        rate       = audio_cfg.get("rate", 16000)
-        self._level_thread = _LevelThread(self._emit_level, rate=rate, device=cfg_device)
-        self._level_thread.start()
-        ao = self._cfg.get("always_on", {})
-        max_sec = self._cfg.get("hotkey", {}).get("max_record_seconds", 300)
-        self._max_rec_timer.start(max_sec * 1000)
 
     def _start_always_on_stream(self) -> None:
-        """Single unified sounddevice stream — VAD + recording + level."""
+        ao = self._cfg.get("always_on", {})
+        max_sec = ao.get("max_record_seconds", 120)
         self._ao_stream = _AlwaysOnStream(
             cfg=self._cfg,
             on_audio_ready=lambda p: self._ao_audio_ready.emit(p),
@@ -354,18 +515,18 @@ class VoiceService(QObject):
             on_silence_fired=lambda: self._ao_silence_fired.emit(),
         )
         self._ao_stream.start()
+        self._max_rec_timer.start(max_sec * 1000)
 
     def _on_ao_silence_fired(self) -> None:
-        """Always-on stream finished — update recording state."""
         if not self._recording:
             return
         self._recording = False
+        self._max_rec_timer.stop()
         self._ao_stream = None
         self.level_changed.emit(0)
         self.stopped_recording.emit()
 
     def _on_ao_audio_ready(self, wav_path: pathlib.Path) -> None:
-        """Always-on: WAV is ready, kick off transcription."""
         if not wav_path.exists():
             self.error.emit("No audio recorded")
             return
@@ -375,24 +536,45 @@ class VoiceService(QObject):
         self._worker.error.connect(self.error)
         self._worker.start()
 
-    # ── Manual stop ───────────────────────────────────────────────────────────
+    # ── Manual recording (hotkey) ─────────────────────────────────────────────
+
+    def start_recording(self, auto_stop: bool = False) -> None:
+        """Manual hotkey recording — uses arecord + level thread."""
+        if self._recording:
+            return
+        self._recording = True
+        self._wav_path = self._recorder.start()
+        audio_cfg  = self._cfg.get("audio", {})
+        cfg_device = audio_cfg.get("monitor_device") or audio_cfg.get("device", "default")
+        rate       = audio_cfg.get("rate", 16000)
+        self._level_thread = _LevelThread(self._emit_level, rate=rate, device=cfg_device)
+        self._level_thread.start()
+        max_sec = self._cfg.get("hotkey", {}).get("max_record_seconds", 300)
+        self._max_rec_timer.start(max_sec * 1000)
+        self.started.emit()
+        log.info("VoiceService: manual recording started")
 
     def stop_recording(self) -> None:
+        self._max_rec_timer.stop()
+
+        if self._wake_detector:
+            self._wake_detector.stop()
+            self._wake_detector = None
+            self.level_changed.emit(0)
+            return
+
         if not self._recording:
             return
         self._recording = False
-        self._max_rec_timer.stop()
 
         if self._ao_stream:
             self._ao_stream.stop()
             self._ao_stream = None
-            # _on_ao_silence_fired already emits stopped_recording via signal;
-            # but since we forced stop, emit directly
             self.level_changed.emit(0)
             self.stopped_recording.emit()
             return
 
-        # Manual mode: stop arecord
+        # Manual mode
         if self._level_thread:
             self._level_thread.stop()
             self._level_thread = None
