@@ -10,9 +10,9 @@ audio:
   rate: 16000
   format: S16_LE
   tmp_dir: /tmp/crowia
-  monitor_device: 'sof-hda-dsp: - (hw:2,7)'
+  monitor_device: 'pipewire'
 whisper:
-  model: medium
+  model: small
   language: es
   device: cpu
   compute_type: int8
@@ -70,7 +70,7 @@ claude:
     Bash(giselo-browser*) Bash(giselo-playwright*) Bash(giselo-google*) 
     Bash(giselo-remind*) Bash(giselo-activate-profile*) Bash(giselo-launch-app*)
     Read Edit Write
-  timeout_seconds: 300
+  timeout_seconds: 600
 browser:
   type: chromium
 backend: claude
@@ -80,6 +80,8 @@ codex:
   working_dir: ""
 opencode:
   model: opencode/big-pickle
+gemini:
+  model: ""
 always_on:
   wake_phrases:
   - oye giselo
@@ -134,6 +136,7 @@ skills:
   - cachyos-kde
   - google
   - remind
+  - morning_digest
 ui:
   accent: "#88c93a"
 instances:
@@ -141,7 +144,13 @@ instances:
   - opencode
   - claude
   - codex
+  - Opencode Free
+  - Opencode Premium
+  - Gemini Own
   backends:
     opencode: opencode
     claude: claude
     codex: codex
+    Opencode Free: opencode
+    Opencode Premium: opencode
+    Gemini Own: gemini

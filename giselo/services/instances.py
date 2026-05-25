@@ -8,7 +8,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from crowia.assistant import Assistant
 from crowia.config import load as load_config
-from giselo.services import memory as mem_svc
 
 log = logging.getLogger(__name__)
 
@@ -98,14 +97,11 @@ class InstanceService(QObject):
             f"{base}\n\nEstás corriendo sobre el backend '{name}'.{persona_line}"
         )
 
-    def ask(self, text: str) -> None:
+    def ask(self, text: str, history: list[dict] | None = None) -> None:
         if self._busy:
             log.warning("Already processing — ignoring ask")
             return
-        self._inject_backend_name(self._cfg.get("backend", "claude"))
-
-        mem_svc.add_user(text)
-        history = mem_svc.get_messages()[:-1]  # exclude the message we just added
+        history = history or []
 
         self._busy = True
         self.busy_changed.emit(True)
@@ -138,7 +134,6 @@ class InstanceService(QObject):
     # ── Internal ──────────────────────────────────────────────────────────────
 
     def _on_done(self, full_response: str) -> None:
-        mem_svc.add_assistant(full_response)
         self._cleanup()
         self.response_complete.emit(full_response)
         self.busy_changed.emit(False)

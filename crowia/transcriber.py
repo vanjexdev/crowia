@@ -56,7 +56,7 @@ class Transcriber:
         segs, _ = self._model.transcribe(
             str(wav_path),
             language=lang or None,
-            beam_size=3,
+            beam_size=1,
             temperature=0,
             condition_on_previous_text=False,
             no_speech_threshold=0.5,

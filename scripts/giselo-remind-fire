@@ -9,7 +9,17 @@ MSG="$*"
 
 notify-send --urgency=critical --expire-time=12000 "🔔 Recordatorio" "$MSG" 2>/dev/null || true
 
-echo "$MSG" | piper-tts \
-    --model "$HOME/.local/share/piper/es_ES-davefx-medium.onnx" \
-    --output_raw 2>/dev/null \
-    | aplay -r 22050 -f S16_LE -t raw - 2>/dev/null || true
+# Write to pending file so the running Giselo app picks it up via SchedulerService.
+# If app is not running, fall back to standalone piper TTS.
+mkdir -p /tmp/crowia
+echo "$MSG" >> /tmp/crowia/pending_reminder
+
+# Fallback: also speak directly (app will de-dup if it reads the file within ~5s)
+sleep 6
+if [ -f /tmp/crowia/pending_reminder ] && grep -qF "$MSG" /tmp/crowia/pending_reminder 2>/dev/null; then
+    # App didn't consume it — speak standalone
+    echo "$MSG" | piper-tts \
+        --model "$HOME/.local/share/piper/es_MX-claude-high.onnx" \
+        --output_raw 2>/dev/null \
+        | aplay -r 22050 -f S16_LE -t raw - 2>/dev/null || true
+fi

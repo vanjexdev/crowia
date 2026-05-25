@@ -1,3 +1,6 @@
+import logging
+log = logging.getLogger(__name__)
+
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                               QSizePolicy, QApplication, QFrame, QPushButton,
                               QStackedWidget)
@@ -6,7 +9,6 @@ from PyQt6.QtGui import QColor
 
 from giselo.app.theme import build_qss, LIME, CYAN, ORANGE, MUTE, RED
 from giselo.app.state import state
-from giselo.services.instances import InstanceService
 from giselo.widgets.title_bar    import TitleBar
 from giselo.widgets.tab_dock     import TabDock
 from giselo.widgets.rail_left    import RailLeft
@@ -58,30 +60,30 @@ class MainWindow(QMainWindow):
         self._drawers: dict[str, Drawer] = {}
         # Maps instance name → context name (usually same; shared if user chose to link)
         self._context_map: dict[str, str] = {n: n for n in state.INSTANCES}
-        self._response_buf = ""
-        self._sentence_buf = ""
         self._tts_streaming = False
         self._always_on = False
         self._tts_active = False
         self._cancelling = False
+        self._voice_is_auto = False    # True only when recording was started by always-on
+        self._wake_triggered = False   # True = next auto-recording skips wake word check
         self._palette = PalettePopup(self)
         self._palette.accent_selected.connect(self._on_accent)
         self._build_ui()
         self._connect_signals()
         self._apply_breakpoint(self.width())
 
-        self._svc = InstanceService(self)
-        self._svc.chunk_received.connect(self._on_chunk)
-        self._svc.response_complete.connect(self._on_response_done)
-        self._svc.response_error.connect(self._on_response_error)
-        self._svc.busy_changed.connect(self._on_busy_changed)
+        self._services: dict[str, "InstanceService"] = {}
+        self._response_bufs: dict[str, str] = {n: "" for n in state.INSTANCES}
+        self._sentence_bufs: dict[str, str] = {n: "" for n in state.INSTANCES}
+        for _inst_name in state.INSTANCES:
+            self._make_service(_inst_name)
 
         from crowia.config import load as load_cfg
         _cfg = load_cfg()
 
         from giselo.services.tts import TTSService
         self._tts = TTSService(_cfg, self)
-        self._tts.started.connect(lambda: self._giselo_core.set_state("speaking"))
+        self._tts.started.connect(lambda: self._set_state("speaking"))
         self._tts.started.connect(lambda: setattr(self, "_tts_active", True))
         self._tts.finished.connect(self._on_tts_done)
         self._tts.error.connect(lambda e: notif.push(f"TTS: {e}", "warn"))
@@ -100,6 +102,13 @@ class MainWindow(QMainWindow):
         from giselo.app.resize_grip import ResizeFilter
         self._resize_filter = ResizeFilter(self)
         self._resize_filter.install()
+
+        from giselo.widgets.floating_orb import FloatingOrb
+        self._orb = FloatingOrb(self)
+
+        from giselo.services.scheduler_svc import SchedulerService
+        self._scheduler = SchedulerService(self)
+        self._scheduler.reminder_due.connect(self._on_reminder_due)
 
     # ── UI Construction ───────────────────────────────────────────────────────
 
@@ -240,7 +249,8 @@ class MainWindow(QMainWindow):
         self._rail_left.setVisible(is_compact)
         self._rail_right.setVisible(is_compact)
         self._stacked_chat.setVisible(is_compact)
-        self._cancel_bar.setVisible(is_compact and self._svc.busy if hasattr(self, '_svc') else False)
+        _active_svc = self._services.get(state.active_instance) if hasattr(self, '_services') else None
+        self._cancel_bar.setVisible(is_compact and bool(_active_svc and _active_svc.busy))
         self._input_bar.set_compact(is_min)
 
         # Close drawer if we drop below MEDIUM
@@ -265,6 +275,7 @@ class MainWindow(QMainWindow):
         if self._voice.recording:
             self._voice.stop_recording()
         else:
+            self._voice_is_auto = False   # manual press — no wake word gate
             self._voice.start_recording()
 
     def toggle_always_on(self) -> None:
@@ -272,16 +283,23 @@ class MainWindow(QMainWindow):
         self._input_bar.set_always_on(self._always_on)
         if self._always_on:
             if not self._voice.recording and not self._tts_active:
+                self._voice_is_auto = True
                 self._voice.start_recording(auto_stop=True)
+            if hasattr(self, "_orb"):
+                self._orb.show()
         else:
+            self._wake_triggered = False
             if self._voice.recording:
                 self._voice.stop_recording()
+            if hasattr(self, "_orb") and not self.isMinimized():
+                self._orb.hide()
 
     def _resume_always_on(self) -> None:
         if not self._always_on:
             return
         if self._voice.recording or self._tts_active or not self._input_bar.isEnabled():
             return
+        self._voice_is_auto = True
         self._voice.start_recording(auto_stop=True)
 
     def toggle_camera(self) -> None:
@@ -356,14 +374,27 @@ class MainWindow(QMainWindow):
         mem_svc.set_active(self._context_map.get(name, name))
         self._tab_dock.set_active(name)
         self._status_bar.set_instance(name)
-        backend = state.INSTANCE_BACKENDS.get(name, "claude")
-        self._svc.switch_backend(backend)
-        # Switch chat view to this instance
         if name in self._chats:
             self._stream_chat = self._chats[name]
             self._stacked_chat.setCurrentWidget(self._stream_chat)
+        svc = self._services.get(name)
+        if svc:
+            self._on_busy_changed(svc.busy)
+        backend = state.INSTANCE_BACKENDS.get(name, "claude")
         notif.push(f"Instancia: {name} ({backend})", "info")
         self._refresh_drawer_if_open("config")
+
+    def _make_service(self, name: str) -> "InstanceService":
+        from giselo.services.instances import InstanceService
+        svc = InstanceService(self)
+        backend = state.INSTANCE_BACKENDS.get(name, "claude")
+        svc.switch_backend(backend)
+        svc.chunk_received.connect(lambda c, n=name: self._on_chunk_for(n, c))
+        svc.response_complete.connect(lambda f, n=name: self._on_done_for(n, f))
+        svc.response_error.connect(lambda e, n=name: self._on_error_for(n, e))
+        svc.busy_changed.connect(lambda b, n=name: self._on_busy_for(n, b))
+        self._services[name] = svc
+        return svc
 
     def _on_add_instance(self) -> None:
         from PyQt6.QtWidgets import QInputDialog
@@ -378,7 +409,7 @@ class MainWindow(QMainWindow):
             return
         backend, ok2 = QInputDialog.getItem(
             self, "Backend", f"Backend para '{name}':",
-            ["claude", "codex", "opencode"], 0, False
+            ["claude", "codex", "opencode", "gemini"], 0, False
         )
         if not ok2:
             return
@@ -395,6 +426,9 @@ class MainWindow(QMainWindow):
         state.INSTANCE_BACKENDS[name] = backend
         from giselo.app.state import save_instances
         save_instances(state.INSTANCES, state.INSTANCE_BACKENDS)
+        self._make_service(name)
+        self._response_bufs[name] = ""
+        self._sentence_bufs[name] = ""
 
         if ctx_choice == "Nuevo contexto":
             chat = StreamChatArea()
@@ -441,7 +475,7 @@ class MainWindow(QMainWindow):
 
     def _on_tts_done(self) -> None:
         self._tts_active = False
-        self._giselo_core.set_state("idle")
+        self._set_state("idle")
         self._giselo_core.set_pill_text("● ESCUCHANDO · LVL 0%")
         self._resume_always_on()
 
@@ -451,6 +485,7 @@ class MainWindow(QMainWindow):
         state.voice_active = True
         self._status_bar.set_voice(True)
         self._rail_right.set_active("voz")
+        self._set_state("listening")
         self._giselo_core.set_pill_text("● GRABANDO · LVL 0%")
         notif.push("Grabación iniciada", "info")
 
@@ -461,14 +496,75 @@ class MainWindow(QMainWindow):
     def _on_voice_transcribed(self, text: str) -> None:
         state.voice_active = False
         self._status_bar.set_voice(False)
+        was_auto = self._voice_is_auto
+        self._voice_is_auto = False
+        if was_auto:
+            if self._wake_triggered:
+                # Previous utterance was wake-word-only — process this one directly
+                self._wake_triggered = False
+            else:
+                wake_words = self._get_wake_words()
+                clean, triggered = self._check_wake_word(text, wake_words)
+                if not triggered:
+                    log.debug("Always-on: no wake word in '%s', resuming", text[:40])
+                    self._giselo_core.set_pill_text("● ESCUCHANDO · LVL 0%")
+                    from PyQt6.QtCore import QTimer
+                    QTimer.singleShot(300, self._resume_always_on)
+                    return
+                text = clean
+                if not text.strip():
+                    # Name only — activate next utterance without wake word
+                    self._wake_triggered = True
+                    self._set_state("listening")
+                    self._giselo_core.set_pill_text("● TE ESCUCHO...")
+                    from PyQt6.QtCore import QTimer
+                    QTimer.singleShot(200, self._resume_always_on)
+                    return
         notif.push(f"Voz: {text[:40]}", "ok")
         self._on_message(text)
+
+    def _get_wake_words(self) -> list[str]:
+        try:
+            import yaml, pathlib
+            cfg = yaml.safe_load(
+                (pathlib.Path(__file__).parents[2] / "config.yaml").read_text(encoding="utf-8")
+            )
+            asst = cfg.get("assistant", {})
+            gender = asst.get("gender", "male")
+            name = asst.get("name_female" if gender == "female" else "name_male", "Giselo").lower()
+            ao = cfg.get("always_on", {})
+            static = [p.lower() for p in ao.get("wake_phrases", [])]
+            dynamic = [name, f"oye {name}", f"hey {name}", f"hola {name}"]
+            return list(dict.fromkeys(static + dynamic))
+        except Exception:
+            return ["giselo", "oye giselo", "hey giselo", "giseth", "oye giseth", "hey giseth"]
+
+    def _check_wake_word(self, text: str, wake_words: list[str]) -> tuple[str, bool]:
+        import re
+        low = text.lower().strip()
+        for phrase in wake_words:
+            if phrase in low:
+                # Strip wake phrase from start of string
+                cleaned = re.sub(rf'^\W*{re.escape(phrase)}\W*', '', low, flags=re.IGNORECASE).strip()
+                return cleaned, True
+        return text, False
+
+    def _on_reminder_due(self, message: str) -> None:
+        from datetime import datetime
+        notif.push(f"Recordatorio: {message}", "info")
+        active = state.active_instance
+        chat = self._chats.get(active)
+        if chat:
+            ts = datetime.now().strftime("%H:%M")
+            chat.begin_response(ts)
+            chat.finish_response(f"🔔 Recordatorio: {message}", ts)
+        self._tts.speak(message)
 
     def _on_voice_error(self, msg: str) -> None:
         state.voice_active = False
         self._status_bar.set_voice(False)
         self._rail_right.set_active(None)
-        self._giselo_core.set_state("error")
+        self._set_state("error")
         self._giselo_core.set_pill_text("● ERROR VOZ")
         notif.push(f"Voz error: {msg}", "error")
         from PyQt6.QtCore import QTimer
@@ -497,34 +593,45 @@ class MainWindow(QMainWindow):
     def _on_message(self, text: str) -> None:
         self._tts.stop()
         from datetime import datetime
+        from giselo.services import memory as mem_svc
         ts = datetime.now().strftime("%H:%M")
-        self._response_buf = ""
-        self._sentence_buf = ""
+        active = state.active_instance
+        self._response_bufs[active] = ""
+        self._sentence_bufs[active] = ""
         self._tts_streaming = False
         self._cancelling = False
         self._stream_chat.add_user(text, ts)
         self._stream_chat.begin_response(ts)
-        self._giselo_core.set_state("thinking")
+        self._set_state("thinking")
         self._giselo_core.set_pill_text("● PROCESANDO")
         self._input_bar.setEnabled(False)
-        self._svc.ask(text)
+        ctx = self._context_map.get(active, active)
+        mem_svc.set_active(ctx)
+        mem_svc.add_user(text)
+        history = mem_svc.get_messages()[:-1]
+        svc = self._services.get(active)
+        if svc:
+            svc.ask(text, history)
 
-    def _on_chunk(self, chunk: str) -> None:
-        from crowia.output import _split_sentences
-        # Support both accumulated (most backends) and delta chunk formats
-        if chunk.startswith(self._response_buf):
-            delta = chunk[len(self._response_buf):]
-            self._response_buf = chunk
+    def _on_chunk_for(self, instance: str, chunk: str) -> None:
+        chat = self._chats.get(instance)
+        if not chat:
+            return
+        prev = self._response_bufs.get(instance, "")
+        if chunk.startswith(prev):
+            delta = chunk[len(prev):]
+            self._response_bufs[instance] = chunk
         else:
             delta = chunk
-            self._response_buf += chunk
-        self._giselo_core.set_state("speaking")
-        self._giselo_core.set_pill_text("● RESPONDIENDO")
-        self._stream_chat.update_response(self._response_buf)
-        if not delta:
+            self._response_bufs[instance] = prev + chunk
+        chat.update_response(self._response_bufs[instance])
+        if instance != state.active_instance or not delta:
             return
-        self._sentence_buf += delta
-        sentences, self._sentence_buf = _split_sentences(self._sentence_buf)
+        self._set_state("speaking")
+        self._giselo_core.set_pill_text("● RESPONDIENDO")
+        from crowia.output import _split_sentences
+        self._sentence_bufs[instance] = self._sentence_bufs.get(instance, "") + delta
+        sentences, self._sentence_bufs[instance] = _split_sentences(self._sentence_bufs[instance])
         for sent in sentences:
             if not self._tts_streaming:
                 self._tts.begin_stream(sent)
@@ -532,17 +639,27 @@ class MainWindow(QMainWindow):
             else:
                 self._tts.stream_sentence(sent)
 
-    def _on_response_done(self, full: str) -> None:
+    def _on_done_for(self, instance: str, full: str) -> None:
         from datetime import datetime
+        from giselo.services import memory as mem_svc
         ts = datetime.now().strftime("%H:%M")
-        self._stream_chat.finish_response(full, ts)
-        self._giselo_core.set_state("success")
+        ctx = self._context_map.get(instance, instance)
+        prev_ctx = mem_svc._active_name
+        mem_svc.set_active(ctx)
+        mem_svc.add_assistant(full)
+        mem_svc.set_active(prev_ctx)
+        chat = self._chats.get(instance)
+        if chat:
+            chat.finish_response(full, ts)
+        self._response_bufs[instance] = ""
+        if instance != state.active_instance:
+            return
+        self._set_state("success")
         self._giselo_core.set_pill_text("● LISTO")
         notif.push("Respuesta recibida", "ok")
         self._refresh_drawer_if_open("historial")
-        # Flush remaining sentence buffer (text after last punctuation)
-        remaining = self._sentence_buf.strip()
-        self._sentence_buf = ""
+        remaining = self._sentence_bufs.get(instance, "").strip()
+        self._sentence_bufs[instance] = ""
         if remaining:
             if not self._tts_streaming:
                 self._tts.begin_stream(remaining)
@@ -553,32 +670,38 @@ class MainWindow(QMainWindow):
         if self._tts_streaming:
             self._tts.end_stream()
         self._tts_streaming = False
-        # Always-on: if no TTS session active, resume listening now
         if self._always_on and not tts_was_streaming and not self._tts_active:
             from PyQt6.QtCore import QTimer
             QTimer.singleShot(600, self._resume_always_on)
 
-    def _on_response_error(self, msg: str) -> None:
+    def _on_error_for(self, instance: str, msg: str) -> None:
+        chat = self._chats.get(instance)
+        if chat:
+            chat.error_response(msg)
+        self._response_bufs[instance] = ""
+        if instance != state.active_instance:
+            return
         self._tts_active = False
         if self._cancelling:
             self._cancelling = False
-            self._stream_chat.error_response("cancelado")
-            self._giselo_core.set_state("idle")
+            self._set_state("idle")
             self._giselo_core.set_pill_text("● ESCUCHANDO · LVL 0%")
             self._input_bar.setEnabled(True)
             self._resume_always_on()
             return
-        self._giselo_core.set_state("error")
+        self._set_state("error")
         self._giselo_core.set_pill_text("● ERROR")
-        self._stream_chat.error_response(msg)
-        self._input_bar.setEnabled(True)
         notif.push(f"Error: {msg}", "error")
         from PyQt6.QtCore import QTimer
         QTimer.singleShot(2000, lambda: (
-            self._giselo_core.set_state("idle"),
+            self._set_state("idle"),
             self._giselo_core.set_pill_text("● ESCUCHANDO · LVL 0%"),
             self._resume_always_on(),
         ))
+
+    def _on_busy_for(self, instance: str, busy: bool) -> None:
+        if instance == state.active_instance:
+            self._on_busy_changed(busy)
 
     def _on_pip_closed(self) -> None:
         state.camera_active = False
@@ -632,7 +755,9 @@ class MainWindow(QMainWindow):
 
     def _on_cancel(self) -> None:
         self._cancelling = True
-        self._svc.cancel()
+        svc = self._services.get(state.active_instance)
+        if svc:
+            svc.cancel()
         self._tts.stop()
 
     def _on_busy_changed(self, busy: bool) -> None:
@@ -640,8 +765,27 @@ class MainWindow(QMainWindow):
         self._cancel_bar.setVisible(busy)
         if not busy:
             state.giselo_state = "idle"
-        state.mem_tokens = len(str(self._response_buf)) // 4
+            if self._always_on and not self._voice.recording and not self._tts_active:
+                from PyQt6.QtCore import QTimer
+                QTimer.singleShot(400, self._resume_always_on)
+        state.mem_tokens = len(str(self._response_bufs.get(state.active_instance, ""))) // 4
         self._status_bar.set_mem(state.mem_tokens)
+
+    def _set_state(self, s: str) -> None:
+        self._giselo_core.set_state(s)
+        if hasattr(self, "_orb"):
+            self._orb.set_state(s)
+
+    def changeEvent(self, event) -> None:
+        super().changeEvent(event)
+        from PyQt6.QtCore import QEvent
+        from PyQt6.QtCore import Qt as _Qt
+        if event.type() == QEvent.Type.WindowStateChange and hasattr(self, "_orb"):
+            minimized = bool(self.windowState() & _Qt.WindowState.WindowMinimized)
+            if minimized:
+                self._orb.show()
+            elif not self._always_on:
+                self._orb.hide()
 
     def sizeHint(self) -> QSize:
         return QSize(920, 640)

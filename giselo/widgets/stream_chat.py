@@ -107,7 +107,7 @@ class StreamChatArea(QWidget):
         self._msgs = QVBoxLayout(self._content)
         self._msgs.setContentsMargins(8, 4, 8, 6)
         self._msgs.setSpacing(4)
-        self._msgs.addStretch()
+        self._msgs.addStretch()  # top stretch — pushes messages to bottom
 
         scroll.setWidget(self._content)
         root.addWidget(scroll, stretch=1)
@@ -181,8 +181,7 @@ class StreamChatArea(QWidget):
     # ── Internal ───────────────────────────────────────────────────────────────
 
     def _insert(self, widget: QWidget) -> None:
-        idx = self._msgs.count() - 1  # before trailing stretch
-        self._msgs.insertWidget(idx, widget)
+        self._msgs.addWidget(widget)
         self._scroll_bottom()
 
     def _scroll_bottom(self) -> None:

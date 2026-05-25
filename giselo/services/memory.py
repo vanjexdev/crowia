@@ -4,7 +4,7 @@ import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from crowia.history import ConversationHistory
+from crowia.semantic_memory import SemanticMemory as ConversationHistory
 from crowia.config import load as load_config
 
 _cfg = load_config()
@@ -43,6 +43,10 @@ def add_assistant(text: str) -> None:
 
 def get_messages() -> list[dict]:
     return _hist().get_messages()
+
+
+def search(query: str, limit: int = 5) -> list[dict]:
+    return _hist().search(query, limit)
 
 
 def clear() -> None:

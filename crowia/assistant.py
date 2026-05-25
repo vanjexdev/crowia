@@ -12,6 +12,7 @@ from .backends.codex import CodexBackend
 from .backends.generic_cli import GenericCliBackend
 from .backends.moonshot import MoonshotBackend
 from .backends.openai_compat import OpenAICompatBackend
+from .backends.gemini import GeminiBackend
 from .backends.opencode import OpenCodeBackend
 from .registry import BackendRegistry
 from . import skills as skills_mod
@@ -23,6 +24,7 @@ log = logging.getLogger(__name__)
 _BUILTIN: dict[str, type] = {
     "claude":    ClaudeCliBackend,
     "codex":     CodexBackend,
+    "gemini":    GeminiBackend,
     "opencode":  OpenCodeBackend,
 }
 
@@ -72,6 +74,8 @@ class Assistant:
             return ClaudeCliBackend(self._cfg)
         if btype == "codex":
             return CodexBackend(self._cfg)
+        if btype == "gemini":
+            return GeminiBackend(self._cfg)
         if btype == "opencode":
             return OpenCodeBackend(self._cfg)
         if btype == "moonshot":

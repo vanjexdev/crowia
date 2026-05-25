@@ -128,7 +128,6 @@ class TTSService(QObject):
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except Exception:
             pass
-        self._playerctl_play()
 
     def _reload_config(self) -> None:
         try:
@@ -153,7 +152,6 @@ class TTSService(QObject):
         if not self.enabled or not text.strip():
             return
         self.stop()
-        self._playerctl_pause()
         self._duck()
         self._worker = _SpeakWorker(self._handler, text, self)
         self._worker.finished.connect(self.finished)
@@ -169,7 +167,6 @@ class TTSService(QObject):
         if not self.enabled or not first_sentence.strip():
             return
         self.stop()
-        self._playerctl_pause()
         self._duck()
         self._worker = _StreamingTTSWorker(self._handler, self._tts_cmd, self)
         self._worker.finished.connect(self.finished)
