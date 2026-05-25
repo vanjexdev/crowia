@@ -53,10 +53,12 @@ class InstanceService(QObject):
     response_error    = pyqtSignal(str)   # error message
     busy_changed      = pyqtSignal(bool)  # True=processing, False=idle
 
-    def __init__(self, parent=None):
+    def __init__(self, instance_name: str = "", parent=None):
         super().__init__(parent)
-        self._cfg       = load_config()
-        self._assistant = Assistant(self._cfg)
+        self._cfg = load_config()
+        inst_cfgs = self._cfg.get("instances", {}).get("config", {})
+        self._instance_cfg = inst_cfgs.get(instance_name, {}) or {}
+        self._assistant = Assistant(self._cfg, instance_config=self._instance_cfg)
         self._thread: QThread | None  = None
         self._worker: _AskWorker | None = None
         self._busy = False

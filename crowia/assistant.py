@@ -37,8 +37,9 @@ _FAILOVER_TRIGGERS = frozenset([
 
 
 class Assistant:
-    def __init__(self, cfg: dict):
+    def __init__(self, cfg: dict, instance_config: dict | None = None):
         self._cfg = cfg
+        self._instance_cfg = instance_config or {}
         self._base_prompt = cfg["claude"]["system_prompt"]
         self._memory_text: str = ""
         self._enabled_skills: list[str] = list(cfg.get("skills", {}).get("enabled", []))
@@ -61,21 +62,22 @@ class Assistant:
     def _build_by_id(self, backend_id: str) -> Backend:
         entry = self._registry.get(backend_id)
         if entry:
-            return self._build_entry(entry)
+            merged = {**entry, **{k: v for k, v in self._instance_cfg.items() if v}}
+            return self._build_entry(merged)
         cls = _BUILTIN.get(backend_id.lower())
         if cls:
-            return cls(self._cfg)
+            return cls(self._cfg, self._instance_cfg)
         log.warning("Backend '%s' desconocido, usando claude.", backend_id)
-        return ClaudeCliBackend(self._cfg)
+        return ClaudeCliBackend(self._cfg, self._instance_cfg)
 
     def _build_entry(self, entry: dict) -> Backend:
         btype = entry.get("type", "generic_cli")
         if btype == "claude_cli":
-            return ClaudeCliBackend(self._cfg)
+            return ClaudeCliBackend(self._cfg, self._instance_cfg)
         if btype == "codex":
             return CodexBackend(self._cfg)
         if btype == "gemini":
-            return GeminiBackend(self._cfg)
+            return GeminiBackend(self._cfg, self._instance_cfg)
         if btype == "opencode":
             return OpenCodeBackend(self._cfg)
         if btype == "moonshot":

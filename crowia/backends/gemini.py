@@ -14,9 +14,11 @@ log = logging.getLogger(__name__)
 class GeminiBackend(Backend):
     name = "Gemini"
 
-    def __init__(self, cfg: dict):
+    def __init__(self, cfg: dict, instance_cfg: dict | None = None):
+        inst = instance_cfg or {}
         self._binary = shutil.which("gemini") or "gemini"
-        self._model: str = cfg.get("gemini", {}).get("model", "")
+        self._model: str = inst.get("model", "") or cfg.get("gemini", {}).get("model", "")
+        self._api_key_override = inst.get("api_key", "")
         self._proc: subprocess.Popen | None = None
         self._lock = threading.Lock()
 
@@ -49,6 +51,8 @@ class GeminiBackend(Backend):
             cmd = [self._binary, "--skip-trust", "--yolo", "-m", self._model, "-p", full]
 
         env = os.environ.copy()
+        if self._api_key_override:
+            env["GEMINI_API_KEY"] = self._api_key_override
         env["GEMINI_CLI_TRUST_WORKSPACE"] = "true"
 
         try:

@@ -1,5 +1,5 @@
 from PyQt6.QtWidgets import QWidget, QHBoxLayout, QPushButton, QLabel
-from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtCore import pyqtSignal, Qt
 from giselo.app.theme import LIME, CYAN, ORANGE, MUTE, INK
 
 
@@ -11,8 +11,9 @@ INSTANCE_META = {
 
 
 class TabDock(QWidget):
-    instance_changed     = pyqtSignal(str)
+    instance_changed       = pyqtSignal(str)
     instance_add_requested = pyqtSignal()
+    config_requested       = pyqtSignal(str)
 
     def __init__(self, instances: list[str], active: str, parent=None):
         super().__init__(parent)
@@ -47,7 +48,24 @@ class TabDock(QWidget):
         btn.setFixedHeight(44)
         btn.setCursor(__import__("PyQt6.QtCore", fromlist=["Qt"]).Qt.CursorShape.PointingHandCursor)
         btn.clicked.connect(lambda _, n=name: self.instance_changed.emit(n))
+        btn.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        btn.customContextMenuRequested.connect(lambda pos, n=name, b=btn: self._on_tab_ctx(n, b, pos))
         return btn
+
+    def _on_tab_ctx(self, name: str, btn: QPushButton, pos) -> None:
+        from PyQt6.QtWidgets import QMenu
+        menu = QMenu(self)
+        menu.setStyleSheet(
+            "QMenu { background: #0f1a2e; color: #cfd6e6;"
+            " border: 1px solid rgba(93,107,133,0.4);"
+            " font-family: 'JetBrains Mono', monospace; font-size: 11px; }"
+            "QMenu::item { padding: 5px 16px; }"
+            "QMenu::item:selected { background: rgba(136,201,58,0.15); color: #88c93a; }"
+        )
+        menu.addAction("⚙  Configurar").triggered.connect(
+            lambda: self.config_requested.emit(name)
+        )
+        menu.exec(btn.mapToGlobal(pos))
 
     def add_instance(self, name: str) -> None:
         btn = self._make_tab(name)

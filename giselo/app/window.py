@@ -223,6 +223,7 @@ class MainWindow(QMainWindow):
     def _connect_signals(self) -> None:
         self._tab_dock.instance_changed.connect(self.switch_instance)
         self._tab_dock.instance_add_requested.connect(self._on_add_instance)
+        self._tab_dock.config_requested.connect(self._on_instance_config)
         self._rail_left.drawer_toggled.connect(self.toggle_drawer)
         self._rail_right.action_triggered.connect(self._on_rail_right)
         self._input_bar.message_submitted.connect(self._on_message)
@@ -389,7 +390,7 @@ class MainWindow(QMainWindow):
 
     def _make_service(self, name: str) -> "InstanceService":
         from giselo.services.instances import InstanceService
-        svc = InstanceService(self)
+        svc = InstanceService(instance_name=name, parent=self)
         backend = state.INSTANCE_BACKENDS.get(name, "claude")
         svc.switch_backend(backend)
         svc.chunk_received.connect(lambda c, n=name: self._on_chunk_for(n, c))
@@ -398,6 +399,12 @@ class MainWindow(QMainWindow):
         svc.busy_changed.connect(lambda b, n=name: self._on_busy_for(n, b))
         self._services[name] = svc
         return svc
+
+    def _on_instance_config(self, name: str) -> None:
+        from giselo.widgets.instance_config_dialog import InstanceConfigDialog
+        dlg = InstanceConfigDialog(name, self)
+        if dlg.exec():
+            self._make_service(name)
 
     def _on_add_instance(self) -> None:
         from PyQt6.QtWidgets import QInputDialog

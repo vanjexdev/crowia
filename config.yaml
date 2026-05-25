@@ -141,7 +141,7 @@ skills:
   - remind
   - morning_digest
 ui:
-  accent: "#88c93a"
+  accent: "#3a9ee0"
 instances:
   list:
   - opencode
@@ -157,3 +157,4 @@ instances:
     Opencode Free: opencode
     Opencode Premium: opencode
     Gemini Own: gemini
+  config: {}

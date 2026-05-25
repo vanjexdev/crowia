@@ -14,9 +14,11 @@ log = logging.getLogger(__name__)
 class ClaudeCliBackend(Backend):
     name = "Claude"
 
-    def __init__(self, cfg: dict):
+    def __init__(self, cfg: dict, instance_cfg: dict | None = None):
+        inst = instance_cfg or {}
         self._binary = cfg["claude"]["binary"] or shutil.which("claude") or ""
-        self._model = cfg["claude"].get("model", "claude-haiku-4-5")
+        self._model = inst.get("model", "") or cfg["claude"].get("model", "claude-haiku-4-5")
+        self._api_key_override = inst.get("api_key", "")
         tools = cfg["claude"].get("allowed_tools",
             "WebSearch Bash(git *) Bash(zeditor*) Bash(alacritty*) Bash(giselo-ask*) Bash(giselo-askpass*) Bash(giselo-pick*) Bash(giselo-browser*) Bash(giselo-google*) Bash(giselo-remind*) Read Edit Write")
         self._allowed_tools = tools
@@ -82,7 +84,10 @@ class ClaudeCliBackend(Backend):
         ]
 
         env = os.environ.copy()
-        env.pop("ANTHROPIC_API_KEY", None)
+        if self._api_key_override:
+            env["ANTHROPIC_API_KEY"] = self._api_key_override
+        else:
+            env.pop("ANTHROPIC_API_KEY", None)
         uid = os.getuid()
         env.setdefault("WAYLAND_DISPLAY", "wayland-0")
         env.setdefault("DISPLAY", ":0")
