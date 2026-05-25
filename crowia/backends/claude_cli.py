@@ -86,8 +86,6 @@ class ClaudeCliBackend(Backend):
         env = os.environ.copy()
         if self._api_key_override:
             env["ANTHROPIC_API_KEY"] = self._api_key_override
-        else:
-            env.pop("ANTHROPIC_API_KEY", None)
         uid = os.getuid()
         env.setdefault("WAYLAND_DISPLAY", "wayland-0")
         env.setdefault("DISPLAY", ":0")
