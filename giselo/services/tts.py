@@ -156,8 +156,10 @@ class TTSService(QObject):
         self._worker = _SpeakWorker(self._handler, text, self)
         self._worker.finished.connect(self.finished)
         self._worker.error.connect(self.error)
-        self._worker.finished.connect(self._cleanup)
-        self._worker.finished.connect(self._unduck)
+        # Ensure cleanup on both success and failure
+        for sig in (self._worker.finished, self._worker.error):
+            sig.connect(self._cleanup)
+            sig.connect(self._unduck)
         self._worker.start()
         self.started.emit()
 
@@ -171,8 +173,10 @@ class TTSService(QObject):
         self._worker = _StreamingTTSWorker(self._handler, self._tts_cmd, self)
         self._worker.finished.connect(self.finished)
         self._worker.error.connect(self.error)
-        self._worker.finished.connect(self._cleanup)
-        self._worker.finished.connect(self._unduck)
+        # Ensure cleanup on both success and failure
+        for sig in (self._worker.finished, self._worker.error):
+            sig.connect(self._cleanup)
+            sig.connect(self._unduck)
         self._worker.enqueue(first_sentence)
         self._worker.start()
         self.started.emit()

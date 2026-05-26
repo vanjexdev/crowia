@@ -44,12 +44,16 @@ class Recorder:
     # ── Linux / arecord ────────────────────────────────────────────────────────
 
     def _start_arecord(self):
+        device = str(self.cfg["device"])
+        if device.isdigit():
+            device = f"hw:{device}"
+
         cmd = [
             "arecord",
-            "-D", self.cfg["device"],
+            "-D", device,
             "-c", str(self.cfg["channels"]),
             "-r", str(self.cfg["rate"]),
-            "-f", self.cfg["format"],
+            "-f", str(self.cfg["format"]),
             "-t", "wav",
             str(self._wav_path),
         ]

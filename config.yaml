@@ -5,12 +5,12 @@ hotkey:
   mode: toggle
   max_record_seconds: 300
 audio:
-  device: default
+  device: 0
   channels: 1
   rate: 16000
   format: S16_LE
   tmp_dir: /tmp/crowia
-  monitor_device: 'pipewire'
+  monitor_device: 'NexiGo N60 FHD Webcam: USB Audio (hw:1,0)'
 whisper:
   model: small
   language: es
@@ -21,7 +21,7 @@ whisper:
     terminal, busca, qué es, cómo se hace, mira la pantalla, sube el volumen, 
     baja el volumen.
 claude:
-  model: claude-haiku-4-5
+  model: claude-sonnet-4-6
   api_key: ""
   system_prompt: 'Tu nombre es Giselo. NUNCA te identifiques como Claude, Anthropic,
     ni ningún otro nombre — siempre eres Giselo. Si alguien pregunta quién eres, di

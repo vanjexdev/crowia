@@ -90,7 +90,8 @@ class MainWindow(QMainWindow):
         self._tts.started.connect(lambda: self._set_state("speaking"))
         self._tts.started.connect(lambda: setattr(self, "_tts_active", True))
         self._tts.finished.connect(self._on_tts_done)
-        self._tts.error.connect(lambda e: notif.push(f"TTS: {e}", "warn"))
+        self._tts.finished.connect(lambda: log.debug("TTS finished signal fired"))
+        self._tts.error.connect(self._on_tts_error)
 
         from giselo.services.voice import VoiceService
         self._voice = VoiceService(_cfg, self)
@@ -289,23 +290,30 @@ class MainWindow(QMainWindow):
 
     def toggle_always_on(self) -> None:
         self._always_on = not self._always_on
+        log.info("Always-On toggled: %s", self._always_on)
         self._input_bar.set_always_on(self._always_on)
         if self._always_on:
+            notif.push("Modo Siempre-Activo: ON", "ok")
             if not self._voice.busy and not self._tts_active:
                 self._resume_always_on()
             if hasattr(self, "_orb"):
                 self._orb.show()
         else:
+            notif.push("Modo Siempre-Activo: OFF", "warn")
             self._wake_triggered = False
             self._voice.stop_wake_listening()
             if self._voice.recording:
                 self._voice.stop_recording()
+            self._giselo_core.set_pill_text("● LISTO")
+            self._set_state("idle")
             if hasattr(self, "_orb") and not self.isMinimized():
                 self._orb.hide()
 
     def _resume_always_on(self) -> None:
         if not self._always_on:
             return
+        log.debug("resume_always_on check: busy=%s wake=%s tts=%s input=%s",
+                  self._voice.busy, self._voice.wake_listening, self._tts_active, self._input_bar.isEnabled())
         if self._voice.busy or self._voice.wake_listening or self._tts_active or not self._input_bar.isEnabled():
             return
         wake_words = self._get_wake_words()
@@ -535,6 +543,18 @@ class MainWindow(QMainWindow):
         from PyQt6.QtCore import QTimer
         QTimer.singleShot(2000, self._resume_always_on)
 
+    def _on_tts_error(self, e: str) -> None:
+        log.warning("TTS error: %s", e)
+        notif.push(f"TTS: {e}", "warn")
+        self._tts_active = False
+        self._resume_always_on()
+
+    def _force_rearm_always_on(self) -> None:
+        if self._always_on and self._tts_active:
+            log.warning("always-on watchdog: TTS done never fired, forcing re-arm")
+            self._tts_active = False
+            self._resume_always_on()
+
     def set_screen_ctx(self, enabled: bool) -> None:
         self._screen_ctx_enabled = enabled
 
@@ -663,6 +683,7 @@ class MainWindow(QMainWindow):
 
     def _on_message(self, text: str) -> None:
         self._tts.stop()
+        self._tts_active = False
         from datetime import datetime
         from giselo.services import memory as mem_svc
         ts = datetime.now().strftime("%H:%M")
@@ -741,6 +762,8 @@ class MainWindow(QMainWindow):
         tts_was_streaming = self._tts_streaming
         if self._tts_streaming:
             self._tts.end_stream()
+            from PyQt6.QtCore import QTimer
+            QTimer.singleShot(10000, self._force_rearm_always_on)
         self._tts_streaming = False
         if self._always_on and not tts_was_streaming and not self._tts_active:
             from PyQt6.QtCore import QTimer

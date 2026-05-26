@@ -19,15 +19,15 @@ class _WakeDetector(threading.Thread):
     On wake word confirmed → calls on_wake().
     """
 
-    CLIP_AFTER_SPEECH_MS = 1200   # capture N ms after speech starts, then transcribe
-    PRE_SPEECH_MS        = 400    # keep N ms of audio before speech onset (ring buffer)
+    CLIP_AFTER_SPEECH_MS = 1800   # Increased from 1200 for better context
+    PRE_SPEECH_MS        = 500    # Increased from 400
 
     def __init__(self, cfg: dict, wake_words: list[str], on_wake, on_level):
         super().__init__(daemon=True)
         ao                   = cfg.get("always_on", {})
         audio_cfg            = cfg.get("audio", {})
         self._rate           = audio_cfg.get("rate", 16000)
-        self._aggressiveness = ao.get("vad_aggressiveness", 2)
+        self._aggressiveness = ao.get("vad_aggressiveness", 3) # More aggressive VAD (1-3)
         cfg_device           = audio_cfg.get("monitor_device") or audio_cfg.get("device", "default")
         self._sd_device, self._pulse_source = _sd_device(cfg_device)
         self._wake_words     = [w.lower() for w in wake_words]
@@ -57,17 +57,41 @@ class _WakeDetector(threading.Thread):
             segs, _ = self._tiny_model.transcribe(
                 audio,
                 language="es",
-                beam_size=1,
+                beam_size=5, # Increased from 1 for better accuracy
                 temperature=0,
-                vad_filter=False,       # already know there's speech
-                no_speech_threshold=0.7,
+                vad_filter=True, # Enable internal filter too
+                no_speech_threshold=0.5, # Lowered from 0.7 to be less strict
             )
-            text = " ".join(s.text for s in segs).lower().strip()
+            import re
+            raw_text = " ".join(s.text for s in segs).lower().strip()
+            # Clean common transcription artifacts like ¿ ? ! . ,
+            text = re.sub(r'[¿?!\.,]', '', raw_text).strip()
+            log.info("WakeDetector heard: '%s' (raw: %r)", text, raw_text)
+
+            if not text:
+                return False
+
+            # Direct match
+            for w in self._wake_words:
+                if w in text:
+                    return True
+
+            # fuzzy phonetic match for common Whisper "tiny" errors on "Giselo/Gisela"
+            # remove spaces for the check: "hi se lo" -> "hiselo"
+            text_no_space = text.replace(" ", "")
+            fuzzy_variants = [
+                "jicelo", "jiselo", "diselo", "selo", "iselo", "isela", "icela",
+                "hicelo", "hiselo", "ojicelo", "ojiselo", "hiselo", "hicelo"
+            ]
+            for v in fuzzy_variants:
+                if v in text_no_space:
+                    log.info("WakeDetector: fuzzy match on '%s' in '%s'", v, text_no_space)
+                    return True
+
+            return False
         except Exception as e:
             log.debug("WakeDetector transcribe error: %s", e)
             return False
-        log.info("WakeDetector heard: %r", text)
-        return any(w in text for w in self._wake_words)
 
     def run(self) -> None:
         import os
