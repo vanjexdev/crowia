@@ -86,6 +86,8 @@ class ClaudeCliBackend(Backend):
         env = os.environ.copy()
         if self._api_key_override:
             env["ANTHROPIC_API_KEY"] = self._api_key_override
+        else:
+            env.pop("ANTHROPIC_API_KEY", None)
         uid = os.getuid()
         env.setdefault("WAYLAND_DISPLAY", "wayland-0")
         env.setdefault("DISPLAY", ":0")
@@ -198,8 +200,9 @@ class ClaudeCliBackend(Backend):
             return ""
 
         if rc != 0:
+            detail = (accumulated or stderr_data).strip()
             log.error("CLI error (rc=%d) stderr: %s | stdout: %s", rc, stderr_data[:300], accumulated[:300])
-            return f"[crowia] Error del CLI (rc={rc})"
+            return f"[crowia] Error del CLI (rc={rc}): {detail}"
 
         response = accumulated.strip()
         log.info("Claude response (%d chars): %s", len(response), response[:200])

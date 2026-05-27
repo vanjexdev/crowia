@@ -30,9 +30,23 @@ class Transcriber:
         self.language = w["language"] or None
         self.device = w["device"]
         self.compute_type = w["compute_type"]
-        log.info("Loading Whisper '%s' (%s/%s)…", self.model_size, self.device, self.compute_type)
-        self._model = WhisperModel(self.model_size, device=self.device, compute_type=self.compute_type)
-        log.info("Whisper ready.")
+        self._model: "WhisperModel | None" = None  # lazy — loaded on first transcribe()
+
+    def _ensure_model(self) -> None:
+        if self._model is None:
+            log.info("Loading Whisper '%s' (%s/%s)…", self.model_size, self.device, self.compute_type)
+            self._model = WhisperModel(self.model_size, device=self.device, compute_type=self.compute_type)
+            log.info("Whisper ready.")
+
+    def unload(self) -> None:
+        """Release the Whisper model from memory."""
+        if self._model is not None:
+            log.info("Unloading Whisper '%s' to free RAM", self.model_size)
+            self._model = None
+
+    @property
+    def loaded(self) -> bool:
+        return self._model is not None
 
     def transcribe(self, wav_path: pathlib.Path) -> str:
         if not wav_path.exists():
@@ -51,6 +65,7 @@ class Transcriber:
             )
             return ""
 
+        self._ensure_model()
         lang = _i18n.t("whisper_lang") or self.language
         log.debug("Transcribing %s (lang=%s, rms=%.4f)", wav_path, lang, rms)
         segs, _ = self._model.transcribe(

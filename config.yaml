@@ -10,7 +10,7 @@ audio:
   rate: 16000
   format: S16_LE
   tmp_dir: /tmp/crowia
-  monitor_device: 'NexiGo N60 FHD Webcam: USB Audio (hw:1,0)'
+  monitor_device: "NexiGo N60 FHD Webcam: USB Audio (hw:1,0)"
 whisper:
   model: small
   language: es
@@ -65,15 +65,17 @@ claude:
     PERFILES DE TRABAJO: Si el usuario dice "vamos a trabajar para [nombre]" o "activa
     el perfil [nombre]", ejecuta ''giselo-activate-profile [nombre]'' — esto lanza
     el navegador del perfil y activa su contexto.'
-  allowed_tools: WebSearch Bash(git *) Bash(zeditor*) Bash(alacritty*) 
-    Bash(giselo-ask*) Bash(giselo-askpass*) Bash(giselo-pick*) 
-    Bash(giselo-browser*) Bash(giselo-playwright*) Bash(giselo-google*) 
+  allowed_tools: WebSearch Bash(git *) Bash(zeditor*) Bash(alacritty*)
+    Bash(giselo-ask*) Bash(giselo-askpass*) Bash(giselo-pick*)
+    Bash(giselo-browser*) Bash(giselo-playwright*) Bash(giselo-google*)
     Bash(giselo-remind*) Bash(giselo-activate-profile*) Bash(giselo-launch-app*)
+    Bash(hyperframes*) Bash(cp *) Bash(ffmpeg*) Bash(ffprobe*)
     Read Edit Write
   timeout_seconds: 600
 browser:
   type: chromium
 backend: claude
+editor: zeditor        # binary to open files from chips (fallback: xdg-open)
 codex:
   model: ""
   sandbox: danger-full-access
@@ -82,6 +84,10 @@ opencode:
   model: opencode/big-pickle
 gemini:
   model: ""
+speaker_verification:
+  enabled: true # set true after running: scripts/giselo-enroll-speaker
+  profile: ~/.config/crowia/speaker.npy
+  threshold: 0.75 # 0.0-1.0; lower = more permissive
 always_on:
   wake_phrases:
   - oye giselo
@@ -129,8 +135,8 @@ assistant:
   name_female: Gisela
 elevenlabs:
   enabled: false
-  api_key: 'sk_69ce973f1f41fea1130b2f6f24ede0064bee503108563a56'
-  voice_id: 'tdBy2L4e43Cgb91Z2iN6'
+  api_key: "sk_69ce973f1f41fea1130b2f6f24ede0064bee503108563a56"
+  voice_id: "tdBy2L4e43Cgb91Z2iN6"
   model_id: eleven_multilingual_v2
 skills:
   path: skills/
@@ -140,20 +146,25 @@ skills:
   - google
   - morning_digest
   - remind
+  - hyperframes
 ui:
   accent: "#3a9ee0"
 instances:
   list:
+  - hybrid
   - opencode
   - claude
   - codex
   - openrouter
   - Opencode Free
   - Opencode Premium
+  - Gemini
   backends:
+    hybrid: hybrid
     opencode: opencode
     claude: claude
     codex: codex
     openrouter: openrouter
     Opencode Free: opencode
     Opencode Premium: opencode
+    Gemini: gemini

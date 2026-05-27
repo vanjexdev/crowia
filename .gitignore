@@ -17,3 +17,4 @@ site/pnpm-lock.yaml
 .giselo/
 # site extras
 site/pnpm-workspace.yaml
+todo/

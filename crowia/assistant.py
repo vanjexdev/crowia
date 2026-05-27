@@ -10,6 +10,7 @@ from .backends.claude_api_mcp import ClaudeApiMcpBackend
 from .backends.claude_cli import ClaudeCliBackend
 from .backends.codex import CodexBackend
 from .backends.generic_cli import GenericCliBackend
+from .backends.hybrid import HybridBackend
 from .backends.moonshot import MoonshotBackend
 from .backends.openai_compat import OpenAICompatBackend
 from .backends.gemini import GeminiBackend
@@ -32,6 +33,7 @@ _FAILOVER_TRIGGERS = frozenset([
     "rate limit", "rate_limit", "ratelimit",
     "too many requests", "overloaded",
     "quota exceeded", "usage limit",
+    "credit balance", "balance is too low",
     "429", "503",
 ])
 
@@ -86,6 +88,8 @@ class Assistant:
             return ClaudeApiMcpBackend(self._cfg, entry)
         if btype == "openai_compat":
             return OpenAICompatBackend(self._cfg, entry)
+        if btype == "hybrid":
+            return HybridBackend(self._cfg, entry)
         return GenericCliBackend(self._cfg, entry)
 
     # ------------------------------------------------------------------ prompt
@@ -252,26 +256,47 @@ class Assistant:
             self._api_client = anthropic.Anthropic(api_key=api_key)
         return self._api_client
 
+    @staticmethod
+    def _detect_mime(path: pathlib.Path) -> str:
+        """Detect image MIME type from magic bytes, fall back to extension."""
+        _EXT_MIME = {
+            ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+            ".gif": "image/gif",  ".webp": "image/webp",
+            ".png": "image/png",  ".bmp": "image/png",
+        }
+        try:
+            header = path.read_bytes()[:16]
+            if header[:8] == b"\x89PNG\r\n\x1a\n":
+                return "image/png"
+            if header[:3] == b"\xff\xd8\xff":
+                return "image/jpeg"
+            if header[:4] == b"RIFF" and header[8:12] == b"WEBP":
+                return "image/webp"
+            if header[:4] in (b"GIF8", b"GIF9"):
+                return "image/gif"
+        except Exception:
+            pass
+        return _EXT_MIME.get(path.suffix.lower(), "image/png")
+
     def _ask_vision_api(self, text, history, image_path, file_paths):
         content: list[dict] = []
         img_data = base64.standard_b64encode(image_path.read_bytes()).decode()
+        mime = self._detect_mime(image_path)
         content.append({
             "type": "image",
-            "source": {"type": "base64", "media_type": "image/png", "data": img_data},
+            "source": {"type": "base64", "media_type": mime, "data": img_data},
         })
         _IMG_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
-        _IMG_MIME = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif",
-                     ".webp": "image/webp"}
         if file_paths:
             for fp in file_paths:
                 fp = pathlib.Path(fp)
                 ext = fp.suffix.lower()
                 if ext in _IMG_EXTS:
                     try:
-                        mime = _IMG_MIME.get(ext, "image/png")
+                        mime2 = self._detect_mime(fp)
                         img2 = base64.standard_b64encode(fp.read_bytes()).decode()
                         content.append({"type": "image",
-                                        "source": {"type": "base64", "media_type": mime, "data": img2}})
+                                        "source": {"type": "base64", "media_type": mime2, "data": img2}})
                     except Exception as exc:
                         log.warning("Cannot read image %s: %s", fp, exc)
                 else:

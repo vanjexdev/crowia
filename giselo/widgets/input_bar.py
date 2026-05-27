@@ -1,13 +1,13 @@
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout,
                               QPlainTextEdit, QPushButton, QLabel, QSizePolicy,
                               QFileDialog)
-from PyQt6.QtCore import pyqtSignal, Qt
-from PyQt6.QtGui import QKeyEvent
+from PyQt6.QtCore import pyqtSignal, Qt, QUrl
+from PyQt6.QtGui import QKeyEvent, QDragEnterEvent, QDragLeaveEvent, QDropEvent
 from giselo.app.theme import MUTE
 
 
 class InputBar(QWidget):
-    message_submitted  = pyqtSignal(str)
+    message_submitted  = pyqtSignal(str, list)  # text, file_paths
     camera_toggled     = pyqtSignal()
     voice_toggled      = pyqtSignal()
     always_on_toggled  = pyqtSignal()
@@ -19,6 +19,8 @@ class InputBar(QWidget):
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._active_drawer: str | None = None
         self._always_on_active: bool = False
+        self._attached_files: list[str] = []
+        self.setAcceptDrops(True)
 
         root = QVBoxLayout(self)
         root.setContentsMargins(10, 6, 10, 6)
@@ -31,6 +33,23 @@ class InputBar(QWidget):
         self._field.setFixedHeight(52)
         self._field.submitted.connect(self._on_submit)
         root.addWidget(self._field)
+
+        # File chips row — hidden until files attached
+        self._chips_row = QWidget()
+        self._chips_layout = QHBoxLayout(self._chips_row)
+        self._chips_layout.setContentsMargins(2, 0, 2, 0)
+        self._chips_layout.setSpacing(6)
+        self._chips_clear = QPushButton("✕ limpiar")
+        self._chips_clear.setStyleSheet(
+            f"color: {MUTE}; border: none; background: transparent;"
+            "font-family: 'JetBrains Mono', monospace; font-size: 9px;"
+        )
+        self._chips_clear.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._chips_clear.clicked.connect(self._clear_files)
+        self._chips_layout.addStretch()
+        self._chips_layout.addWidget(self._chips_clear)
+        self._chips_row.hide()
+        root.addWidget(self._chips_row)
 
         # Controls row
         ctrl = QHBoxLayout()
@@ -74,6 +93,13 @@ class InputBar(QWidget):
         self._btn_voz.setCursor(Qt.CursorShape.PointingHandCursor)
         self._btn_voz.clicked.connect(self.voice_toggled)
         ctrl.addWidget(self._btn_voz)
+
+        self._btn_attach = QPushButton("📎 adjuntar")
+        self._btn_attach.setProperty("inputBtnMute", True)
+        self._btn_attach.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._btn_attach.setToolTip("Adjuntar archivos")
+        self._btn_attach.clicked.connect(self._attach_files)
+        ctrl.addWidget(self._btn_attach)
 
         self._btn_send = QPushButton("enviar ↵")
         self._btn_send.setProperty("inputBtnAccent", True)
@@ -157,11 +183,100 @@ class InputBar(QWidget):
         self._btn_always.style().unpolish(self._btn_always)
         self._btn_always.style().polish(self._btn_always)
 
+    def dragEnterEvent(self, e: QDragEnterEvent) -> None:
+        if e.mimeData().hasUrls():
+            local = [u for u in e.mimeData().urls() if u.isLocalFile()]
+            if local:
+                e.acceptProposedAction()
+                self._field.setStyleSheet("border: 1px solid #88c93a;")
+                return
+        e.ignore()
+
+    def dragLeaveEvent(self, e: QDragLeaveEvent) -> None:
+        self._field.setStyleSheet("")
+
+    def dropEvent(self, e: QDropEvent) -> None:
+        self._field.setStyleSheet("")
+        paths = [u.toLocalFile() for u in e.mimeData().urls() if u.isLocalFile()]
+        if paths:
+            self._attached_files.extend(p for p in paths if p not in self._attached_files)
+            self._refresh_chips()
+            e.acceptProposedAction()
+            self._on_submit()
+
+    def _attach_files(self) -> None:
+        paths, _ = QFileDialog.getOpenFileNames(self, "Adjuntar archivos")
+        if paths:
+            self._attached_files.extend(p for p in paths if p not in self._attached_files)
+            self._refresh_chips()
+            self._on_submit()
+
+    def _clear_files(self) -> None:
+        self._attached_files.clear()
+        self._refresh_chips()
+
+    def _open_file(self, path: str) -> None:
+        import subprocess, shutil, yaml, pathlib
+        try:
+            cfg_path = pathlib.Path(__file__).parents[2] / "config.yaml"
+            cfg = yaml.safe_load(cfg_path.read_text())
+            editor = cfg.get("editor", "")
+        except Exception:
+            editor = ""
+        if editor and shutil.which(editor):
+            subprocess.Popen([editor, path], start_new_session=True)
+        else:
+            subprocess.Popen(["xdg-open", path], start_new_session=True)
+
+    def _refresh_chips(self) -> None:
+        import os
+        # Clear all items and rebuild
+        while self._chips_layout.count():
+            item = self._chips_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        if not self._attached_files:
+            self._chips_row.hide()
+            return
+        for path in self._attached_files:
+            name = os.path.basename(path)
+            btn = QPushButton(f"📄 {name}")
+            btn.setToolTip(path)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setStyleSheet(
+                "QPushButton { color: #88c93a; background: rgba(136,201,58,0.08); "
+                "border: 1px solid rgba(136,201,58,0.3); border-radius: 3px; "
+                "font-family: 'JetBrains Mono', monospace; font-size: 9px; padding: 2px 6px; }"
+                "QPushButton:hover { background: rgba(136,201,58,0.18); }"
+            )
+            btn.clicked.connect(lambda checked, p=path: self._open_file(p))
+            self._chips_layout.addWidget(btn)
+        self._chips_layout.addStretch()
+        self._chips_clear = QPushButton("✕ limpiar")
+        self._chips_clear.setStyleSheet(
+            f"color: #5d6b85; border: none; background: transparent;"
+            "font-family: 'JetBrains Mono', monospace; font-size: 9px;"
+        )
+        self._chips_clear.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._chips_clear.clicked.connect(self._clear_files)
+        self._chips_layout.addWidget(self._chips_clear)
+        self._chips_row.show()
+
     def _on_submit(self) -> None:
+        import os
         text = self.text()
-        if text:
-            self.message_submitted.emit(text)
-            self.clear()
+        files = list(self._attached_files)
+        if not text and not files:
+            return
+        if not text and files:
+            names = "\n".join(f"- {os.path.basename(f)}" for f in files)
+            text = f"Adjunté los siguientes archivos:\n{names}\n\n¿Qué deseas que haga con ellos?"
+        elif files:
+            names = ", ".join(os.path.basename(f) for f in files)
+            text = f"[📎 {names}] {text}"
+        self.message_submitted.emit(text, files)
+        self.clear()
+        self._clear_files()
 
 
 class _InputField(QPlainTextEdit):

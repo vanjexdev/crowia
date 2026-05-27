@@ -103,18 +103,6 @@ class TTSService(QObject):
         self._worker: _SpeakWorker | _StreamingTTSWorker | None = None
         self.enabled: bool = cfg["output"]["tts_enabled"]
 
-    def _playerctl_pause(self) -> None:
-        try:
-            subprocess.run(["playerctl", "pause"], capture_output=True, timeout=2)
-        except Exception:
-            pass
-
-    def _playerctl_play(self) -> None:
-        try:
-            subprocess.run(["playerctl", "play"], capture_output=True, timeout=2)
-        except Exception:
-            pass
-
     def _duck(self) -> None:
         try:
             subprocess.run([str(_SCRIPTS / "giselo-audio-duck")],
@@ -187,6 +175,8 @@ class TTSService(QObject):
             return
         if isinstance(self._worker, _StreamingTTSWorker) and self._worker.isRunning():
             self._worker.enqueue(sentence)
+        else:
+            log.warning("stream_sentence: worker not running, sentence dropped: %r", sentence[:60])
 
     def end_stream(self) -> None:
         """Signal end of stream — worker flushes remaining audio and finishes."""

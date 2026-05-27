@@ -11,8 +11,25 @@ log = logging.getLogger(__name__)
 _DEFAULT_MODEL = "claude-opus-4-7"
 _MCP_BETA = "mcp-client-2025-04-04"
 _IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
-_IMG_MIME = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif",
-             ".webp": "image/webp", ".bmp": "image/png"}
+_EXT_MIME = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif",
+             ".webp": "image/webp", ".png": "image/png", ".bmp": "image/png"}
+
+
+def _detect_mime(path: pathlib.Path) -> str:
+    """Detect image MIME type from magic bytes, fall back to extension."""
+    try:
+        header = path.read_bytes()[:16]
+        if header[:8] == b"\x89PNG\r\n\x1a\n":
+            return "image/png"
+        if header[:3] == b"\xff\xd8\xff":
+            return "image/jpeg"
+        if header[:4] == b"RIFF" and header[8:12] == b"WEBP":
+            return "image/webp"
+        if header[:4] in (b"GIF8", b"GIF9"):
+            return "image/gif"
+    except Exception:
+        pass
+    return _EXT_MIME.get(path.suffix.lower(), "image/png")
 
 
 class ClaudeApiMcpBackend(Backend):
@@ -88,7 +105,7 @@ class ClaudeApiMcpBackend(Backend):
             if img_p.exists():
                 user_parts.append({
                     "type": "image",
-                    "source": {"type": "base64", "media_type": "image/png",
+                    "source": {"type": "base64", "media_type": _detect_mime(img_p),
                                "data": base64.b64encode(img_p.read_bytes()).decode()},
                 })
 
@@ -99,10 +116,9 @@ class ClaudeApiMcpBackend(Backend):
                 ext = fp.suffix.lower()
                 if ext in _IMAGE_EXTS:
                     try:
-                        mime = _IMG_MIME.get(ext, "image/png")
                         user_parts.append({
                             "type": "image",
-                            "source": {"type": "base64", "media_type": mime,
+                            "source": {"type": "base64", "media_type": _detect_mime(fp),
                                        "data": base64.b64encode(fp.read_bytes()).decode()},
                         })
                     except Exception as exc:

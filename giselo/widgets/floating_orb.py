@@ -2,8 +2,9 @@ import json
 import math
 import pathlib
 from PyQt6.QtWidgets import QWidget, QMenu
-from PyQt6.QtCore import Qt, QTimer, QPoint, QRectF
-from PyQt6.QtGui import QPainter, QColor, QRadialGradient, QPen, QCursor, QFont
+from PyQt6.QtCore import Qt, QTimer, QPoint, QPointF, QRectF
+from PyQt6.QtGui import (QPainter, QColor, QRadialGradient, QPen, QCursor,
+                          QFont, QPainterPath, QPixmap)
 
 
 _STATE_COLORS = {
@@ -54,6 +55,11 @@ class FloatingOrb(QWidget):
 
         self._rings: list[float] = []
         self._ring_timer = 0
+        self._ring_rot = 0.0  # degrees, drives concentric ring rotation
+
+        import os as _os
+        _img = _os.path.join(_os.path.dirname(__file__), "..", "..", "images", "icon.png")
+        self._sprite = QPixmap(_img) if _os.path.exists(_img) else QPixmap()
 
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._tick)
@@ -130,8 +136,18 @@ class FloatingOrb(QWidget):
 
     # ── Animation ─────────────────────────────────────────────────────────────
 
+    _ROT_SPEED = {
+        "idle":      0.30,
+        "listening": 0.80,
+        "speaking":  0.55,
+        "thinking":  1.40,
+        "error":     0.45,
+        "success":   0.35,
+    }
+
     def _tick(self) -> None:
         self._phase = (self._phase + 0.06) % (2 * math.pi)
+        self._ring_rot = (self._ring_rot + self._ROT_SPEED.get(self._state, 0.30)) % 360.0
         if self._state in ("listening", "speaking"):
             interval = 18 if self._state == "speaking" else 30
             self._ring_timer += 1
@@ -155,8 +171,7 @@ class FloatingOrb(QWidget):
         c2 = QColor(c2_hex)
         self._draw_rings(painter, cx, cy, r, c1)
         self._draw_glow(painter, cx, cy, r, c1)
-        self._draw_sphere(painter, cx, cy, r, c1, c2)
-        self._draw_highlight(painter, cx, cy, r)
+        self._draw_sprite(painter, cx, cy, r, c1, c2)
         if self._state == "thinking":
             self._draw_arc(painter, cx, cy, r, c1)
         if self._instance_name:
@@ -188,15 +203,48 @@ class FloatingOrb(QWidget):
         p.setPen(Qt.PenStyle.NoPen)
         p.drawEllipse(QRectF(x - dot_r, y - dot_r, dot_r * 2, dot_r * 2))
 
+    # concentric ring configs: (radius_scale, dashed, rot_dir, base_alpha)
+    _RING_LAYERS = [
+        (1.28, False,  0.0,  48),   # outer solid — static anchor ring
+        (1.04, True,  +1.0,  65),   # middle dashed — rotates CW
+        (0.80, True,  -0.7,  45),   # inner dashed — rotates CCW
+    ]
+
     def _draw_rings(self, p, cx, cy, r, c1) -> None:
-        for age in self._rings:
-            ring_r = r + age * 38
-            alpha = int(200 * (1.0 - age))
-            pen = QPen(QColor(c1.red(), c1.green(), c1.blue(), alpha))
-            pen.setWidthF(1.5)
+        # ── Concentric HUD rings ──────────────────────────────────────────────
+        for scale, dashed, dir_, base_alpha in self._RING_LAYERS:
+            rr = r * scale
+            color = QColor(c1.red(), c1.green(), c1.blue(), base_alpha)
+            pen = QPen(color)
+            pen.setWidthF(1.2)
+            if dashed:
+                pen.setDashPattern([5.0, 4.0])
+                pen.setDashOffset(self._ring_rot * dir_ * 0.28)
             p.setPen(pen)
             p.setBrush(Qt.BrushStyle.NoBrush)
-            p.drawEllipse(QRectF(cx - ring_r, cy - ring_r, ring_r * 2, ring_r * 2))
+            p.drawEllipse(QRectF(cx - rr, cy - rr, rr * 2, rr * 2))
+
+        # ── Tick marks on outer ring ──────────────────────────────────────────
+        outer_r  = r * 1.28
+        tick_end = outer_r + 4.5
+        tick_col = QColor(c1.red(), c1.green(), c1.blue(), 48)
+        p.setPen(QPen(tick_col, 0.9))
+        for k in range(12):
+            angle = math.radians(k * 30.0 + self._ring_rot * 0.10)
+            p.drawLine(
+                QPointF(cx + outer_r * math.cos(angle), cy + outer_r * math.sin(angle)),
+                QPointF(cx + tick_end * math.cos(angle), cy + tick_end * math.sin(angle)),
+            )
+
+        # ── Ripple rings (listening / speaking) ───────────────────────────────
+        for age in self._rings:
+            rr2   = r + age * 38
+            alpha = int(190 * (1.0 - age))
+            pen2  = QPen(QColor(c1.red(), c1.green(), c1.blue(), alpha))
+            pen2.setWidthF(1.4)
+            p.setPen(pen2)
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.drawEllipse(QRectF(cx - rr2, cy - rr2, rr2 * 2, rr2 * 2))
 
     def _draw_glow(self, p, cx, cy, r, c1) -> None:
         pulse = 0.82 + 0.18 * math.sin(self._phase * 1.8)
@@ -208,27 +256,42 @@ class FloatingOrb(QWidget):
         p.setBrush(glow)
         p.drawEllipse(QRectF(cx - gr, cy - gr, gr * 2, gr * 2))
 
-    def _draw_sphere(self, p, cx, cy, r, c1, c2) -> None:
+    def _draw_sprite(self, p, cx, cy, r, c1, c2) -> None:
         breath = 0.96 + 0.04 * math.sin(self._phase)
         sr = r * breath
-        grad = QRadialGradient(cx - sr * 0.28, cy - sr * 0.28, sr * 1.2)
-        grad.setColorAt(0.00, QColor(255, 255, 255, 55))
-        grad.setColorAt(0.30, c1)
-        grad.setColorAt(0.72, c2)
-        grad.setColorAt(1.00, QColor(0, 0, 0, 210))
-        p.setBrush(grad)
-        p.setPen(QPen(QColor(255, 255, 255, 25), 1))
+
+        # Clip to circle
+        clip = QPainterPath()
+        clip.addEllipse(QRectF(cx - sr, cy - sr, sr * 2, sr * 2))
+        p.save()
+        p.setClipPath(clip)
+
+        if not self._sprite.isNull():
+            sz = int(sr * 2)
+            scaled = self._sprite.scaled(
+                sz, sz,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            p.drawPixmap(int(cx - scaled.width() / 2), int(cy - scaled.height() / 2), scaled)
+        else:
+            # Fallback sphere if image missing
+            grad = QRadialGradient(cx - sr * 0.28, cy - sr * 0.28, sr * 1.2)
+            grad.setColorAt(0.00, QColor(255, 255, 255, 55))
+            grad.setColorAt(0.30, c1)
+            grad.setColorAt(0.72, c2)
+            grad.setColorAt(1.00, QColor(0, 0, 0, 210))
+            p.setBrush(grad)
+            p.setPen(Qt.PenStyle.NoPen)
+            p.drawEllipse(QRectF(cx - sr, cy - sr, sr * 2, sr * 2))
+
+        # Subtle state tint overlay
+        tint = QColor(c1.red(), c1.green(), c1.blue(), 28)
+        p.setBrush(tint)
+        p.setPen(Qt.PenStyle.NoPen)
         p.drawEllipse(QRectF(cx - sr, cy - sr, sr * 2, sr * 2))
 
-    def _draw_highlight(self, p, cx, cy, r) -> None:
-        hr = r * 0.33
-        hx, hy = cx - r * 0.22, cy - r * 0.30
-        hi = QRadialGradient(hx, hy, hr)
-        hi.setColorAt(0.0, QColor(255, 255, 255, 120))
-        hi.setColorAt(1.0, QColor(255, 255, 255, 0))
-        p.setBrush(hi)
-        p.setPen(Qt.PenStyle.NoPen)
-        p.drawEllipse(QRectF(hx - hr, hy - hr, hr * 2, hr * 2))
+        p.restore()
 
     def _draw_arc(self, p, cx, cy, r, c1) -> None:
         pen = QPen(c1, 2.5)

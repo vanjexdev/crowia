@@ -55,6 +55,18 @@ def _deep_merge(base: dict, override: dict) -> dict:
     return result
 
 
+def _cleanup_old_wavs(tmp_dir: pathlib.Path) -> None:
+    """Delete WAV files older than 24h to prevent disk fill."""
+    import time
+    cutoff = time.time() - 86400
+    for f in tmp_dir.glob("*.wav"):
+        try:
+            if f.stat().st_mtime < cutoff:
+                f.unlink()
+        except Exception:
+            pass
+
+
 def load(path: str | None = None) -> dict:
     if path is None:
         path = str(PROJECT_ROOT / "config.yaml")
@@ -101,6 +113,8 @@ def load(path: str | None = None) -> dict:
             cfg[section][key] = str(pathlib.Path(cfg[section][key]).expanduser())
 
     # Create tmp_dir
-    pathlib.Path(cfg["audio"]["tmp_dir"]).mkdir(parents=True, exist_ok=True)
+    tmp_dir = pathlib.Path(cfg["audio"]["tmp_dir"])
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    _cleanup_old_wavs(tmp_dir)
 
     return cfg

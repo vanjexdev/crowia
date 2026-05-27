@@ -18,13 +18,14 @@ class _AskWorker(QObject):
     error    = pyqtSignal(str)
 
     def __init__(self, assistant: Assistant, text: str, history: list[dict],
-                 image_path: str | None = None):
+                 image_path: str | None = None, file_paths: list[str] | None = None):
         super().__init__()
-        self._assistant  = assistant
-        self._text       = text
-        self._history    = history
-        self._image_path = image_path
-        self._cancelled  = False
+        self._assistant   = assistant
+        self._text        = text
+        self._history     = history
+        self._image_path  = image_path
+        self._file_paths  = file_paths or []
+        self._cancelled   = False
 
     def cancel(self) -> None:
         self._cancelled = True
@@ -34,11 +35,13 @@ class _AskWorker(QObject):
     def run(self) -> None:
         import pathlib
         img = pathlib.Path(self._image_path) if self._image_path else None
+        fps = [pathlib.Path(f) for f in self._file_paths] if self._file_paths else None
         try:
             full = self._assistant.ask(
                 text=self._text,
                 history=self._history,
                 image_path=img,
+                file_paths=fps,
                 on_chunk=lambda c: self.chunk.emit(c) if not self._cancelled else None,
             )
             if not self._cancelled:
@@ -105,7 +108,7 @@ class InstanceService(QObject):
         )
 
     def ask(self, text: str, history: list[dict] | None = None,
-            image_path: str | None = None) -> None:
+            image_path: str | None = None, file_paths: list[str] | None = None) -> None:
         if self._busy:
             log.warning("Already processing — ignoring ask")
             return
@@ -115,7 +118,7 @@ class InstanceService(QObject):
         self.busy_changed.emit(True)
 
         self._thread = QThread()
-        self._worker = _AskWorker(self._assistant, text, history, image_path)
+        self._worker = _AskWorker(self._assistant, text, history, image_path, file_paths)
         self._worker.moveToThread(self._thread)
 
         self._thread.started.connect(self._worker.run)
@@ -155,6 +158,6 @@ class InstanceService(QObject):
         self._busy = False
         if self._thread:
             self._thread.quit()
-            self._thread.wait(3000)
+            self._thread.wait(500)
         self._thread = None
         self._worker = None

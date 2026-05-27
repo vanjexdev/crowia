@@ -16,9 +16,11 @@ log = logging.getLogger(__name__)
 class OpenCodeBackend(Backend):
     name = "OpenCode"
 
-    def __init__(self, cfg: dict):
+    def __init__(self, cfg: dict, instance_cfg: dict | None = None):
+        inst = instance_cfg or {}
         self._binary = shutil.which("opencode") or "opencode"
-        self._model = cfg.get("opencode", {}).get("model", "opencode/big-pickle")
+        default_model = cfg.get("opencode", {}).get("model", "opencode/big-pickle")
+        self._model = inst.get("model") or default_model
         self._proc: subprocess.Popen | None = None
         self._lock = threading.Lock()
 

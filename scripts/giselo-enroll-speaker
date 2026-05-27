@@ -1,0 +1,84 @@
+#!/home/jesusu/Workspace/agents/crowia/.venv/bin/python3
+"""
+Enroll your voice for speaker verification.
+
+Usage:
+    giselo-enroll-speaker            # interactive: records 3 clips of 6s each
+    giselo-enroll-speaker file1.wav  # enroll from existing WAV file(s)
+"""
+import sys
+import pathlib
+import time
+import wave
+import tempfile
+
+# Add project root to path
+_ROOT = pathlib.Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(_ROOT))
+
+
+def record_clip(duration: int = 6, rate: int = 16000) -> pathlib.Path:
+    import numpy as np
+    import sounddevice as sd
+
+    print(f"  → Grabando {duration}s… habla ahora")
+    frames = sd.rec(int(duration * rate), samplerate=rate, channels=1,
+                    dtype="int16", blocking=True)
+    tmp = pathlib.Path(tempfile.mktemp(suffix=".wav", dir="/tmp"))
+    with wave.open(str(tmp), "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(rate)
+        wf.writeframes(frames.tobytes())
+    return tmp
+
+
+def main():
+    from crowia.speaker_verifier import SpeakerVerifier
+
+    wav_paths: list[pathlib.Path] = []
+    tmp_files: list[pathlib.Path] = []
+
+    if len(sys.argv) > 1:
+        for arg in sys.argv[1:]:
+            p = pathlib.Path(arg)
+            if not p.exists():
+                print(f"[!] No existe: {p}")
+                sys.exit(1)
+            wav_paths.append(p)
+    else:
+        print("═" * 50)
+        print("  Enrollamiento de voz para Giselo")
+        print("═" * 50)
+        print("Se grabarán 3 clips de 6 segundos.")
+        print("Habla con normalidad — di algo como tu nombre,")
+        print("una pregunta, o cualquier texto en voz natural.\n")
+
+        for i in range(1, 4):
+            input(f"  Clip {i}/3 — presiona Enter cuando estés listo…")
+            p = record_clip(duration=6)
+            tmp_files.append(p)
+            wav_paths.append(p)
+            print(f"  ✓ Clip {i} grabado\n")
+            if i < 3:
+                time.sleep(0.5)
+
+    print("\nComputando embedding de voz…")
+    sv = SpeakerVerifier()
+    try:
+        sv.enroll(wav_paths)
+        print("\n✓ Perfil de voz guardado.")
+        print("  Activa speaker_verification.enabled: true en config.yaml")
+    except Exception as e:
+        print(f"\n✗ Error: {e}")
+        sys.exit(1)
+    finally:
+        for p in tmp_files:
+            try:
+                p.unlink()
+            except Exception:
+                pass
+
+
+if __name__ == "__main__":
+    main()

@@ -41,6 +41,23 @@ def take_screenshot() -> pathlib.Path | None:
         log.error("spectacle timed out")
         return None
 
+    # Fallback: flameshot
+    try:
+        result = subprocess.run(
+            ["flameshot", "full", "--path", str(tmp)],
+            capture_output=True,
+            timeout=10,
+            env=env,
+        )
+        if result.returncode == 0 and tmp.exists() and tmp.stat().st_size > 0:
+            log.info("Screenshot via flameshot: %s", tmp)
+            return tmp
+        log.warning("flameshot failed (rc=%d): %s", result.returncode, result.stderr.decode())
+    except FileNotFoundError:
+        log.warning("flameshot not found, trying grim")
+    except subprocess.TimeoutExpired:
+        log.error("flameshot timed out")
+
     # Fallback: wlroots (Hyprland/Sway)
     try:
         result = subprocess.run(

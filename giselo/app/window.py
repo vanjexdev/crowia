@@ -40,7 +40,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Giselo")
-        self.setMinimumSize(465, 600)
+        self.setMinimumSize(465, 900)
         self.resize(920, 640)
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
@@ -66,7 +66,6 @@ class MainWindow(QMainWindow):
         self._tts_active = False
         self._cancelling = False
         self._voice_is_auto = False    # True only when recording was started by always-on
-        self._wake_triggered = False   # True = next auto-recording skips wake word check
         self._palette = PalettePopup(self)
         self._palette.accent_selected.connect(self._on_accent)
         self._build_ui()
@@ -101,6 +100,7 @@ class MainWindow(QMainWindow):
         self._voice.error.connect(self._on_voice_error)
         self._voice.level_changed.connect(self._on_voice_level)
         self._voice.wake_detected.connect(self._on_wake_detected)
+        self._voice.wake_no_match.connect(self._resume_always_on)
 
         from giselo.app import shortcuts
         shortcuts.register(self)
@@ -300,7 +300,6 @@ class MainWindow(QMainWindow):
                 self._orb.show()
         else:
             notif.push("Modo Siempre-Activo: OFF", "warn")
-            self._wake_triggered = False
             self._voice.stop_wake_listening()
             if self._voice.recording:
                 self._voice.stop_recording()
@@ -647,7 +646,6 @@ class MainWindow(QMainWindow):
         state.voice_active = False
         self._status_bar.set_voice(False)
         self._rail_right.set_active(None)
-        self._wake_triggered = False
         from PyQt6.QtCore import QTimer
         if self._always_on and msg in ("No se detectó voz", "No audio recorded"):
             # Command phase got empty audio — restart wake listening quietly
@@ -681,7 +679,7 @@ class MainWindow(QMainWindow):
         elif action == "camara":
             self.toggle_camera()
 
-    def _on_message(self, text: str) -> None:
+    def _on_message(self, text: str, files: list | None = None) -> None:
         self._tts.stop()
         self._tts_active = False
         from datetime import datetime
@@ -704,7 +702,7 @@ class MainWindow(QMainWindow):
         svc = self._services.get(active)
         if svc:
             img = self._take_screen_ctx() if self._screen_ctx_enabled else None
-            svc.ask(text, history, image_path=img)
+            svc.ask(text, history, image_path=img, file_paths=files or None)
 
     def _on_chunk_for(self, instance: str, chunk: str) -> None:
         chat = self._chats.get(instance)

@@ -22,7 +22,8 @@ class _WakeDetector(threading.Thread):
     CLIP_AFTER_SPEECH_MS = 1800   # Increased from 1200 for better context
     PRE_SPEECH_MS        = 500    # Increased from 400
 
-    def __init__(self, cfg: dict, wake_words: list[str], on_wake, on_level):
+    def __init__(self, cfg: dict, wake_words: list[str], on_wake, on_level,
+                 on_no_match=None, model_factory=None):
         super().__init__(daemon=True)
         ao                   = cfg.get("always_on", {})
         audio_cfg            = cfg.get("audio", {})
@@ -31,16 +32,25 @@ class _WakeDetector(threading.Thread):
         cfg_device           = audio_cfg.get("monitor_device") or audio_cfg.get("device", "default")
         self._sd_device, self._pulse_source = _sd_device(cfg_device)
         self._wake_words     = [w.lower() for w in wake_words]
-        self._on_wake        = on_wake   # callback()
+        self._on_wake        = on_wake        # callback()
+        self._on_no_match    = on_no_match or (lambda: None)  # callback() when clip captured but no wake word
         self._on_level       = on_level  # callback(int)
         self._stop_ev        = threading.Event()
+        self._manually_stopped = False
+        self._model_factory  = model_factory  # callable → shared WhisperModel (prevents per-cycle leak)
         self._tiny_model     = None
         self._model_lock     = threading.Lock()
 
     def stop(self) -> None:
+        self._manually_stopped = True
         self._stop_ev.set()
 
     def _load_model(self):
+        if self._model_factory is not None:
+            # Shared model managed by VoiceService — no per-cycle allocation
+            self._tiny_model = self._model_factory()
+            log.info("WakeDetector: using shared tiny Whisper")
+            return
         with self._model_lock:
             if self._tiny_model is None:
                 from faster_whisper import WhisperModel
@@ -185,6 +195,10 @@ class _WakeDetector(threading.Thread):
 
         if clip and self._check_clip(clip):
             self._on_wake()
+        elif clip and not self._manually_stopped:
+            # Captured audio but no wake word found — notify so listener can restart
+            log.debug("WakeDetector: clip checked, no wake word, notifying no_match")
+            self._on_no_match()
 
 
 # ── Phase-2: Command recorder ─────────────────────────────────────────────────
@@ -373,17 +387,29 @@ class _TranscribeWorker(QThread):
         self._transcriber = transcriber
 
     def run(self) -> None:
+        import concurrent.futures
         try:
             t = self._transcriber
             if t is None:
                 from crowia.transcriber import Transcriber
                 t = Transcriber(self._cfg)
                 self.transcriber_ready.emit(t)
-            text = t.transcribe(self._wav_path)
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+                future = ex.submit(t.transcribe, self._wav_path)
+                try:
+                    text = future.result(timeout=30)
+                except concurrent.futures.TimeoutError:
+                    log.error("Transcription timeout after 30s — returning empty")
+                    text = ""
             self.done.emit(text.strip())
         except Exception as e:
             log.exception("Transcription failed")
             self.error.emit(str(e))
+        finally:
+            try:
+                self._wav_path.unlink(missing_ok=True)
+            except Exception:
+                pass
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -448,10 +474,12 @@ class VoiceService(QObject):
     error              = pyqtSignal(str)
     level_changed      = pyqtSignal(int)
     wake_detected      = pyqtSignal()          # always-on: wake word confirmed
+    wake_no_match      = pyqtSignal()          # always-on: clip processed but no wake word found
     # Internal cross-thread signals
     _ao_audio_ready    = pyqtSignal(object)    # Path
     _ao_silence_fired  = pyqtSignal()
     _wake_confirmed    = pyqtSignal()          # from WakeDetector thread → main thread
+    _wake_no_match_int = pyqtSignal()          # from WakeDetector thread → main thread (no match)
 
     def __init__(self, cfg: dict, parent=None):
         super().__init__(parent)
@@ -463,6 +491,7 @@ class VoiceService(QObject):
         self._wake_detector: _WakeDetector | None = None
         self._worker: _TranscribeWorker | None = None
         self._transcriber = None
+        self._speaker_verifier = None
         self._max_rec_timer = QTimer(self)
         self._max_rec_timer.setSingleShot(True)
         self._max_rec_timer.timeout.connect(self.stop_recording)
@@ -470,19 +499,66 @@ class VoiceService(QObject):
         self._ao_audio_ready.connect(self._on_ao_audio_ready)
         self._ao_silence_fired.connect(self._on_ao_silence_fired)
         self._wake_confirmed.connect(self._on_wake_confirmed)
+        self._wake_no_match_int.connect(self._on_wake_no_match)
+
+        # Shared tiny Whisper — loaded once, reused across WakeDetector cycles (prevents leak)
+        self._tiny_whisper = None
+        self._tiny_whisper_lock = threading.Lock()
+
+        # Unload small Whisper after 120s of inactivity to free ~500MB
+        self._unload_timer = QTimer(self)
+        self._unload_timer.setSingleShot(True)
+        self._unload_timer.timeout.connect(self._unload_transcriber)
 
         from crowia.recorder import Recorder
         self._recorder = Recorder(cfg)
 
-        threading.Thread(target=self._prewarm_whisper, daemon=True).start()
+        threading.Thread(target=self._init_speaker_verifier, daemon=True).start()
 
-    def _prewarm_whisper(self) -> None:
+    def _get_tiny_whisper(self):
+        """Lazily load shared tiny Whisper. Called from WakeDetector background thread."""
+        with self._tiny_whisper_lock:
+            if self._tiny_whisper is None:
+                from faster_whisper import WhisperModel
+                log.info("VoiceService: loading shared tiny Whisper…")
+                self._tiny_whisper = WhisperModel("tiny", device="cpu", compute_type="int8")
+                log.info("VoiceService: shared tiny Whisper ready")
+            return self._tiny_whisper
+
+    def _load_transcriber(self) -> None:
+        if self._transcriber is not None:
+            return
         try:
             from crowia.transcriber import Transcriber
             self._transcriber = Transcriber(self._cfg)
-            log.info("Whisper pre-warmed")
+            log.info("Transcriber ready (model loads on first use)")
         except Exception as e:
-            log.warning("Whisper prewarm failed: %s", e)
+            log.warning("Whisper load failed: %s", e)
+
+    def _unload_transcriber(self) -> None:
+        """Release small Whisper model from RAM after idle period."""
+        if self._transcriber is not None and not self.busy:
+            self._transcriber.unload()
+            log.info("Whisper model unloaded (idle timeout)")
+
+    def _init_speaker_verifier(self) -> None:
+        sv_cfg = self._cfg.get("speaker_verification", {})
+        if not sv_cfg.get("enabled", False):
+            return
+        try:
+            import pathlib as _pl
+            from crowia.speaker_verifier import SpeakerVerifier
+            profile = _pl.Path(sv_cfg.get("profile", "~/.config/crowia/speaker.npy")).expanduser()
+            threshold = float(sv_cfg.get("threshold", 0.75))
+            sv = SpeakerVerifier(profile_path=profile, threshold=threshold)
+            if not sv.has_profile:
+                log.warning("Speaker verification enabled but no profile found at %s — "
+                            "run scripts/giselo-enroll-speaker to enroll", profile)
+                return
+            self._speaker_verifier = sv
+            log.info("Speaker verification active (threshold=%.2f)", threshold)
+        except Exception as e:
+            log.warning("Speaker verifier init failed: %s", e)
 
     @property
     def recording(self) -> bool:
@@ -509,7 +585,9 @@ class VoiceService(QObject):
             cfg=self._cfg,
             wake_words=wake_words,
             on_wake=lambda: self._wake_confirmed.emit(),
+            on_no_match=lambda: self._wake_no_match_int.emit(),
             on_level=lambda lvl: self.level_changed.emit(lvl),
+            model_factory=self._get_tiny_whisper,  # shared — no per-cycle reload
         )
         self._wake_detector.start()
 
@@ -518,6 +596,13 @@ class VoiceService(QObject):
             self._wake_detector.stop()
             self._wake_detector = None
         self.level_changed.emit(0)
+
+    def _on_wake_no_match(self) -> None:
+        """Main thread: WakeDetector captured a clip but found no wake word — clear reference and notify."""
+        log.debug("WakeDetector: no match, releasing reference")
+        self._wake_detector = None
+        self.level_changed.emit(0)
+        self.wake_no_match.emit()  # window.py connects this to _resume_always_on
 
     def _on_wake_confirmed(self) -> None:
         """Main thread: wake word detected → stop detector, start command recording."""
@@ -550,10 +635,29 @@ class VoiceService(QObject):
         self.level_changed.emit(0)
         self.stopped_recording.emit()
 
+    def _resume_wake_listening(self) -> None:
+        """Called when a command clip is rejected — reset state and re-arm wake detector."""
+        self._recording = False
+        self._max_rec_timer.stop()
+        self.level_changed.emit(0)
+        self.stopped_recording.emit()
+        self.wake_no_match.emit()
+
     def _on_ao_audio_ready(self, wav_path: pathlib.Path) -> None:
         if not wav_path.exists():
             self.error.emit("No audio recorded")
             return
+        if self._speaker_verifier is not None:
+            is_user, sim = self._speaker_verifier.verify(wav_path)
+            if not is_user:
+                log.info("Speaker rejected (sim=%.3f) — ignoring command", sim)
+                try:
+                    wav_path.unlink(missing_ok=True)
+                except Exception:
+                    pass
+                self._resume_wake_listening()
+                return
+        self._load_transcriber()
         self._worker = _TranscribeWorker(self._cfg, wav_path, self._transcriber, self)
         self._worker.transcriber_ready.connect(lambda t: setattr(self, "_transcriber", t))
         self._worker.done.connect(self._on_transcribed)
@@ -607,6 +711,7 @@ class VoiceService(QObject):
         self.stopped_recording.emit()
 
         if wav and wav.exists():
+            self._load_transcriber()
             self._worker = _TranscribeWorker(self._cfg, wav, self._transcriber, self)
             self._worker.transcriber_ready.connect(lambda t: setattr(self, "_transcriber", t))
             self._worker.done.connect(self._on_transcribed)
@@ -619,6 +724,8 @@ class VoiceService(QObject):
         self.level_changed.emit(level)
 
     def _on_transcribed(self, text: str) -> None:
+        # Restart idle unload timer — 120s after last transcription, free small Whisper
+        self._unload_timer.start(120_000)
         if text:
             self.transcribed.emit(text)
         else:

@@ -58,6 +58,7 @@ class StreamingTTSPlayer:
         try:
             self._aplay.wait(timeout=120)
         except subprocess.TimeoutExpired:
+            log.warning("aplay took >120s draining audio — killing")
             self._aplay.kill()
         try:
             self._piper.wait(timeout=5)

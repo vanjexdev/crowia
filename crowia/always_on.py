@@ -112,45 +112,57 @@ class AlwaysOnListener:
         proc.join(timeout=5)
 
     def _processor(self):
-        """Single thread: reads utterances sequentially, manages state."""
-        while not self._stop_event.is_set():
-            try:
-                frames = self._utterance_queue.get(timeout=0.5)
-            except queue.Empty:
-                continue
+        """Single thread: reads utterances, dispatches wake-word transcription async."""
+        import concurrent.futures
+        pool = concurrent.futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="ww-transcribe")
+        # pending: future_id → (future, wav_path)
+        pending: dict[int, tuple[concurrent.futures.Future, pathlib.Path]] = {}
 
-            wav = self._save_wav(frames)
-            if wav is None:
-                continue
-
-            if self._active:
-                self._active = False
-                self.on_idle()
-                log.info("Active utterance → pipeline")
-                self.on_speech_ready(wav)
-            else:
-                log.debug("Checking for wake word…")
-                try:
-                    text = self._transcriber.transcribe(wav)
-                except Exception as e:
-                    log.warning("Wake word transcription error: %s", e)
-                    text = ""
-                finally:
+        try:
+            while not self._stop_event.is_set():
+                # Drain completed transcriptions first
+                for fid in list(pending):
+                    fut, wav = pending[fid]
+                    if not fut.done():
+                        continue
+                    del pending[fid]
                     wav.unlink(missing_ok=True)
+                    try:
+                        text = fut.result()
+                    except Exception as e:
+                        log.warning("Wake word transcription error: %s", e)
+                        text = ""
+                    if text and self._has_wake_word(text):
+                        log.info("Wake word detected: '%s'", text)
+                        self._active = True
+                        self.on_wake()
+                        trailing = self._extract_trailing(text)
+                        if trailing:
+                            log.info("Inline command detected: '%s'", trailing)
+                            self.on_text_ready(trailing)
+                    else:
+                        log.debug("No wake word in: '%s'", text)
 
-                if text and self._has_wake_word(text):
-                    log.info("Wake word detected: '%s'", text)
-                    self._active = True
-                    self.on_wake()
+                try:
+                    frames = self._utterance_queue.get(timeout=0.1)
+                except queue.Empty:
+                    continue
 
-                    # If user spoke command inline (e.g. "oye giselo dame la hora"),
-                    # extract trailing and send directly to text pipeline
-                    trailing = self._extract_trailing(text)
-                    if trailing:
-                        log.info("Inline command detected: '%s'", trailing)
-                        self.on_text_ready(trailing)
+                wav = self._save_wav(frames)
+                if wav is None:
+                    continue
+
+                if self._active:
+                    self._active = False
+                    self.on_idle()
+                    log.info("Active utterance → pipeline")
+                    self.on_speech_ready(wav)
                 else:
-                    log.debug("No wake word in: '%s'", text)
+                    log.debug("Checking for wake word (async)…")
+                    fut = pool.submit(self._transcriber.transcribe, wav)
+                    pending[id(fut)] = (fut, wav)
+        finally:
+            pool.shutdown(wait=False)
 
     def _has_wake_word(self, text: str) -> bool:
         low = text.lower().strip()
